@@ -1,0 +1,12 @@
+[package]
+name = "mm3d-inventory"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR GPL-3.0-or-later"
+description = "Vuelca a CSV las funciones que 3dsrecomp descubre en un code.bin ya extraido"
+
+[dependencies]
+# Fijado a un commit. 3dsrecomp es MIT (c) fearkov; se conserva su aviso en LICENSE-3dsrecomp.txt
+recomp3ds = { git = "https://github.com/fearkov/3dsrecomp", rev = "df82e6e" }
+
+[workspace]

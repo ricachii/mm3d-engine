@@ -1,0 +1,5 @@
+Esta herramienta usa como dependencia la biblioteca `recomp3ds` de 3dsrecomp
+(https://github.com/fearkov/3dsrecomp), commit df82e6e, autor fearkov.
+Su Cargo.toml declara `license = "MIT"`. El repositorio no incluye un archivo LICENSE
+con el texto de la licencia en ese commit; si se redistribuye codigo de 3dsrecomp
+(en vez de solo depender de el), hay que pedir/confirmar el texto y conservar su aviso.
