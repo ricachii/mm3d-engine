@@ -247,16 +247,16 @@ def _cia_primary_content(stream: BinaryIO, file_size: int) -> tuple[int, int]:
     certificate_size, ticket_size, tmd_size, meta_size = struct.unpack_from(
         "<IIII", header, 8
     )
-    content_size = struct.unpack_from("<Q", header, 0x18)[0]
     tmd_offset = _align(
         _align(_align(CIA_HEADER_SIZE) + certificate_size) + ticket_size
     )
-    content_offset = _align(_align(tmd_offset + tmd_size) + meta_size)
+    # Standard order puts the meta section before the content. GodMode9's
+    # "Decrypt file" writes decrypted CIAs with the meta section after it, so
+    # both candidate offsets are probed for the NCCH magic below.
+    standard_offset = _align(_align(tmd_offset + tmd_size) + meta_size)
+    compact_offset = _align(tmd_offset + tmd_size)
     _checked_region(
         tmd_offset, tmd_size, lower=0, upper=file_size, label="CIA TMD"
-    )
-    _checked_region(
-        content_offset, content_size, lower=0, upper=file_size, label="CIA content"
     )
     tmd = _read_exact(stream, tmd_offset, tmd_size, "CIA TMD")
     signature_sizes = {
@@ -285,9 +285,17 @@ def _cia_primary_content(stream: BinaryIO, file_size: int) -> tuple[int, int]:
                 "first. On your own 3DS with GodMode9: select the .cia, "
                 "A > CIA image options > Decrypt file (0:/gm9/out)"
             )
-        if record_size == 0 or content_offset + record_size > file_size:
-            raise CtrRomError("the .cia's primary content exceeds the file size")
-        return content_offset, record_size
+        if record_size == 0:
+            raise CtrRomError("the .cia's primary content is empty")
+        for candidate in (standard_offset, compact_offset):
+            if candidate + record_size > file_size:
+                continue
+            if _read_exact(stream, candidate + 0x100, 4, "CIA content") == b"NCCH":
+                return candidate, record_size
+        raise CtrRomError(
+            "the .cia's primary content has no NCCH header at either expected "
+            "position; it may still be encrypted or damaged"
+        )
     raise CtrRomError("the .cia has no executable content (index 0)")
 
 

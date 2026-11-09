@@ -66,6 +66,7 @@ def _build_cia(
     encrypted: bool = False,
     title_type: int = 0x00040000,
     extra_content: bool = True,
+    meta_after_content: bool = False,
 ) -> None:
     """Wrap the synthetic NCCH in a minimal CIA container (no real keys)."""
 
@@ -92,7 +93,8 @@ def _build_cia(
     content = ncch + (b"M" * 0x200 if extra_content else b"")
 
     header = bytearray(0x2020)
-    struct.pack_into("<IHHIIII", header, 0, 0x2020, 0, 0, len(certificate), len(ticket), len(tmd), 0)
+    meta = b"X" * 0x100 if meta_after_content else b""
+    struct.pack_into("<IHHIIII", header, 0, 0x2020, 0, 0, len(certificate), len(ticket), len(tmd), len(meta))
     struct.pack_into("<Q", header, 0x18, len(content))
     out = bytearray(header)
     for part in (certificate, ticket, bytes(tmd)):
@@ -143,6 +145,13 @@ class CtrRomTests(unittest.TestCase):
             extracted = extract_decrypted_rom(root / "game.cia", root / "out")
             self.assertEqual(extracted.container_kind, "CIA")
             self.assertEqual(extracted.program_id, PROGRAM_ID)
+            self.assertEqual(extracted.code.path.read_bytes(), CODE)
+
+    def test_accepts_a_decrypted_cia_with_the_meta_section_after_the_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_cia(root / "game.cia", meta_after_content=True)
+            extracted = extract_decrypted_rom(root / "game.cia", root / "out")
             self.assertEqual(extracted.code.path.read_bytes(), CODE)
 
     def test_rejects_a_cia_whose_content_is_encrypted_with_the_title_key(self) -> None:
