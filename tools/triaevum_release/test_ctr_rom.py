@@ -59,6 +59,49 @@ def _build_rom(path: Path, *, declares_decrypted: bool = True) -> bytes:
     return bytes(image[exheader : exheader + 0x800])
 
 
+
+def _build_cia(
+    path: Path,
+    *,
+    encrypted: bool = False,
+    title_type: int = 0x00040000,
+    extra_content: bool = True,
+) -> None:
+    """Wrap the synthetic NCCH in a minimal CIA container (no real keys)."""
+
+    scratch = path.with_suffix(".scratch.3ds")
+    _build_rom(scratch)
+    ncch = scratch.read_bytes()[PARTITION_BASE:]
+    scratch.unlink()
+
+    def align(value: int) -> int:
+        return (value + 0x3F) // 0x40 * 0x40
+
+    certificate = b"C" * 0x100
+    ticket = b"T" * 0x150
+    count = 2 if extra_content else 1
+    tmd = bytearray(0x140 + 0xC4 + 0x900 + 0x30 * count)
+    struct.pack_into(">I", tmd, 0, 0x010004)
+    struct.pack_into(">II", tmd, 0x140 + 0x4C, title_type, 0x00125500)
+    struct.pack_into(">H", tmd, 0x140 + 0x9E, count)
+    chunk_type = 0x0001 if encrypted else 0x0000
+    base = 0x140 + 0xC4 + 0x900
+    struct.pack_into(">IHHQ", tmd, base, 0, 0, chunk_type, len(ncch))
+    if extra_content:
+        struct.pack_into(">IHHQ", tmd, base + 0x30, 1, 1, 0, 0x200)
+    content = ncch + (b"M" * 0x200 if extra_content else b"")
+
+    header = bytearray(0x2020)
+    struct.pack_into("<IHHIIII", header, 0, 0x2020, 0, 0, len(certificate), len(ticket), len(tmd), 0)
+    struct.pack_into("<Q", header, 0x18, len(content))
+    out = bytearray(header)
+    for part in (certificate, ticket, bytes(tmd)):
+        out += b"\0" * (align(len(out)) - len(out))
+        out += part
+    out += b"\0" * (align(len(out)) - len(out))
+    out += content
+    path.write_bytes(bytes(out))
+
 class CtrRomTests(unittest.TestCase):
     def test_accepts_3ds_and_cci_as_the_same_ncsd_container(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -93,19 +136,54 @@ class CtrRomTests(unittest.TestCase):
             extracted = extract_decrypted_rom(rom, root / "output")
             self.assertEqual(extracted.code.path.read_bytes(), CODE)
 
+    def test_accepts_a_decrypted_cia_and_extracts_the_same_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_cia(root / "game.cia")
+            extracted = extract_decrypted_rom(root / "game.cia", root / "out")
+            self.assertEqual(extracted.container_kind, "CIA")
+            self.assertEqual(extracted.program_id, PROGRAM_ID)
+            self.assertEqual(extracted.code.path.read_bytes(), CODE)
+
+    def test_rejects_a_cia_whose_content_is_encrypted_with_the_title_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_cia(root / "game.cia", encrypted=True)
+            with self.assertRaisesRegex(CtrRomError, "title key"):
+                extract_decrypted_rom(root / "game.cia", root / "out")
+            self.assertFalse((root / "out").exists())
+
+    def test_accepts_a_decrypted_update_cia(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_cia(root / "update.cia", title_type=0x0004000E, extra_content=False)
+            extracted = extract_decrypted_rom(root / "update.cia", root / "out")
+            self.assertEqual(extracted.container_kind, "CIA")
+
+    def test_rejects_downloadable_content_cia(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _build_cia(root / "dlc.cia", title_type=0x0004008C)
+            with self.assertRaisesRegex(CtrRomError, "downloadable content"):
+                extract_decrypted_rom(root / "dlc.cia", root / "out")
+
+    def test_cia_and_cxi_suffixes_are_supported(self) -> None:
+        self.assertTrue(is_supported_rom_path(Path("game.cia")))
+        self.assertTrue(is_supported_rom_path(Path("game.CXI")))
+
     def test_public_import_requires_a_rom_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             rom = root / "game.bin"
             _build_rom(rom)
-            with self.assertRaisesRegex(CtrRomError, r"\.3ds or \.cci"):
+            with self.assertRaisesRegex(CtrRomError, r"\.3ds, \.cci, \.cia or \.cxi"):
                 extract_decrypted_rom(rom, root / "output")
             self.assertFalse((root / "output").exists())
 
     def test_supported_suffix_check_is_case_insensitive(self) -> None:
         self.assertTrue(is_supported_rom_path(Path("game.3DS")))
         self.assertTrue(is_supported_rom_path(Path("game.CCI")))
-        self.assertFalse(is_supported_rom_path(Path("game.cia")))
+        self.assertFalse(is_supported_rom_path(Path("game.iso")))
 
     def test_publishes_inputs_under_a_stable_content_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -7,6 +7,12 @@
 The NCSD/NCCH layout and backwards-LZSS code path follow the documented CTR
 container semantics implemented by Azahar.  This module deliberately handles
 only already-decrypted images; it contains no key or decryption support.
+
+Besides .3ds/.cci (NCSD) and bare .cxi (NCCH) it reads a decrypted .cia: the
+CIA container (header, certificate chain, ticket, TMD, meta, content) only
+locates the executable NCCH, which must already be decrypted.  A CIA whose TMD
+marks its content as encrypted with the title key is rejected with a message
+telling the user how to decrypt it on their own console.
 """
 
 from __future__ import annotations
@@ -27,7 +33,11 @@ EXEFS_HEADER_SIZE = 0x200
 EXEFS_SECTION_COUNT = 8
 COPY_CHUNK_SIZE = 4 * 1024 * 1024
 MAX_DECOMPRESSED_CODE_SIZE = 512 * 1024 * 1024
-SUPPORTED_ROM_SUFFIXES = frozenset({".3ds", ".cci"})
+CIA_HEADER_SIZE = 0x2020
+CIA_ALIGNMENT = 0x40
+TITLE_TYPE_UPDATE = 0x0004000E
+TITLE_TYPE_DLC = 0x0004008C
+SUPPORTED_ROM_SUFFIXES = frozenset({".3ds", ".cci", ".cia", ".cxi"})
 
 
 class CtrRomError(RuntimeError):
@@ -216,6 +226,71 @@ def _parse_ncch(
     )
 
 
+
+def _align(value: int, to: int = CIA_ALIGNMENT) -> int:
+    return (value + to - 1) // to * to
+
+
+def _be(data: bytes, offset: int, size: int) -> int:
+    return int.from_bytes(data[offset : offset + size], "big")
+
+
+def _cia_primary_content(stream: BinaryIO, file_size: int) -> tuple[int, int]:
+    """Return (offset, size) of the executable NCCH (content index 0) of a CIA.
+
+    Raises CtrRomError for DLC, for content encrypted with the title key and for
+    truncated or inconsistent containers.  Updates (title type 0x0004000E) are
+    accepted: they carry the patched ExeFS needed to rebuild a revision.
+    """
+
+    header = _read_exact(stream, 0, CIA_HEADER_SIZE, "CIA header")
+    certificate_size, ticket_size, tmd_size, meta_size = struct.unpack_from(
+        "<IIII", header, 8
+    )
+    content_size = struct.unpack_from("<Q", header, 0x18)[0]
+    tmd_offset = _align(
+        _align(_align(CIA_HEADER_SIZE) + certificate_size) + ticket_size
+    )
+    content_offset = _align(_align(tmd_offset + tmd_size) + meta_size)
+    _checked_region(
+        tmd_offset, tmd_size, lower=0, upper=file_size, label="CIA TMD"
+    )
+    _checked_region(
+        content_offset, content_size, lower=0, upper=file_size, label="CIA content"
+    )
+    tmd = _read_exact(stream, tmd_offset, tmd_size, "CIA TMD")
+    signature_sizes = {
+        0x010000: 0x200, 0x010001: 0x100, 0x010002: 0x3C,
+        0x010003: 0x200, 0x010004: 0x100, 0x010005: 0x3C,
+    }
+    signature_type = _be(tmd, 0, 4)
+    if signature_type not in signature_sizes:
+        raise CtrRomError("the .cia's TMD has an unknown signature type")
+    body = _align(4 + signature_sizes[signature_type], 0x40)
+    title_type = _be(tmd, body + 0x4C, 4)  # high half of the title id
+    if title_type == TITLE_TYPE_DLC:
+        raise CtrRomError("this .cia is downloadable content, not a game")
+    content_count = _be(tmd, body + 0x9E, 2)
+    chunks = body + 0xC4 + 0x900
+    for index in range(content_count):
+        record = chunks + index * 0x30
+        content_index = _be(tmd, record + 4, 2)
+        content_type = _be(tmd, record + 6, 2)
+        record_size = _be(tmd, record + 8, 8)
+        if content_index != 0:
+            continue
+        if content_type & 0x0001:
+            raise CtrRomError(
+                "the .cia is encrypted with the title key and must be decrypted "
+                "first. On your own 3DS with GodMode9: select the .cia, "
+                "A > CIA image options > Decrypt file (0:/gm9/out)"
+            )
+        if record_size == 0 or content_offset + record_size > file_size:
+            raise CtrRomError("the .cia's primary content exceeds the file size")
+        return content_offset, record_size
+    raise CtrRomError("the .cia has no executable content (index 0)")
+
+
 def _find_title_layout(stream: BinaryIO, file_size: int) -> _NcchLayout:
     header = _read_exact(stream, 0, NCSD_HEADER_SIZE, "container header")
     magic = header[0x100:0x104]
@@ -229,7 +304,19 @@ def _find_title_layout(stream: BinaryIO, file_size: int) -> _NcchLayout:
             container_kind="NCCH",
         )
     if magic != b"NCSD":
-        raise CtrRomError("the selected file is not a Nintendo 3DS NCSD/NCCH image")
+        if _u32(header, 0) == CIA_HEADER_SIZE:
+            content_offset, content_size = _cia_primary_content(stream, file_size)
+            return _parse_ncch(
+                stream,
+                file_size=file_size,
+                partition_base=content_offset,
+                partition_size=content_size,
+                partition_index=0,
+                container_kind="CIA",
+            )
+        raise CtrRomError(
+            "the selected file is not a Nintendo 3DS NCSD/NCCH image or .cia"
+        )
 
     failures: list[str] = []
     for partition_index in range(8):
@@ -356,7 +443,9 @@ def extract_decrypted_rom(
     if not source.is_file():
         raise CtrRomError(f"the selected ROM does not exist: {source}")
     if require_rom_suffix and not is_supported_rom_path(source):
-        raise CtrRomError("Forge accepts decrypted ROMs with .3ds or .cci extension")
+        raise CtrRomError(
+            "Forge accepts decrypted ROMs with .3ds, .cci, .cia or .cxi extension"
+        )
 
     output_directory = output_directory.expanduser().resolve()
     if output_directory.exists():
