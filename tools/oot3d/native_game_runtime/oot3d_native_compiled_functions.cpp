@@ -1328,6 +1328,34 @@ bool ExecuteOot3dCompiledFunction(
         return true;
     }
 #if defined(OOT3D_NATIVE_GENERATED_WHOLE_AOT)
+    // Odd pc = Thumb code reached at the top level (a return or branch out of ARM or Thumb code): interpret it
+    // here; the generated dispatch only knows ARM entries. Flow kinds map exactly as the generated code does.
+    if ((pc & 1U) != 0U) {
+        Oot3dWholeAotFrame thumbFrame(state);
+        const Oot3dWholeAotFlow flow = ExecuteThumbExternalCall(pc, thumbFrame, memory);
+        state.r[15] = flow.Pc;
+        using oot3d::recomp::a32::ExitKind;
+        using oot3d::recomp::a32::FallbackReason;
+        switch (flow.Kind) {
+        case Oot3dWholeAotFlowKind::Returned:
+        case Oot3dWholeAotFlowKind::Branch:
+            *result = {ExitKind::Branch, flow.Pc, FallbackReason::None, 0U};
+            break;
+        case Oot3dWholeAotFlowKind::Svc:
+            *result = {ExitKind::Svc, flow.Pc, FallbackReason::None, flow.Detail};
+            break;
+        case Oot3dWholeAotFlowKind::BlockLimit:
+            *result = {ExitKind::BlockLimit, flow.Pc, FallbackReason::None, 1U};
+            break;
+        case Oot3dWholeAotFlowKind::MemoryFault:
+            *result = {ExitKind::MemoryFault, flow.Pc, FallbackReason::None, flow.Detail};
+            break;
+        default:
+            *result = {ExitKind::Unsupported, flow.Pc, FallbackReason::Unsupported, flow.Detail};
+            break;
+        }
+        return true;
+    }
     if (!enableWholeAot) {
 #if defined(OOT3D_WHOLE_AOT_PRODUCT_MODE)
         *result = {
