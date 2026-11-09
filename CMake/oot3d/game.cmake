@@ -8,6 +8,8 @@ add_library(oot3d_native_game_runtime STATIC EXCLUDE_FROM_ALL
     tools/oot3d/native_game_runtime/oot3d_native_scenario_bootstrap.cpp
     tools/oot3d/native_game_runtime/oot3d_native_frame_rate.cpp
     tools/oot3d/native_game_runtime/oot3d_native_presentation_pacer.cpp
+    # Con stubs para no-Switch; el destructor lo exige el enlace de PC.
+    tools/oot3d/native_game_runtime/oot3d_switch_vsync_clock.cpp
     tools/oot3d/native_game_runtime/oot3d_native_temporal_event_ledger.cpp
     tools/oot3d/native_game_runtime/oot3d_native_player_temporal_bridge.cpp
     tools/oot3d/native_game_runtime/oot3d_native_root_motion.cpp

@@ -25,6 +25,9 @@
 #include "oot3d_game_log.h"
 #include <spdlog/spdlog.h>
 #endif
+// Portables: se usan sin condicion mas abajo (en PC fallaba la compilacion).
+#include "fast/backends/gfx_deko3d.h"
+#include "oot3d_game_log.h"
 #include <cstdio>
 #include <algorithm>
 #include <cstdlib>

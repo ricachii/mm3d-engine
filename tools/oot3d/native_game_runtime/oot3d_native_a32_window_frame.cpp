@@ -17,6 +17,8 @@
 #include "fast/oot3d/debug_menu.h"
 #include "oot3d/renderer/azahar_texture_pack.h"
 #endif
+// Portable: ExitGameRequested() se usa sin condicion mas abajo.
+#include "fast/oot3d/debug_menu.h"
 #include "fast/oot3d/pica_texture_predecode.h"
 #include "oot3d/renderer/azahar_texture_pack_settings.h"
 #include <imgui.h>
