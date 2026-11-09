@@ -236,10 +236,23 @@ void NativeA32WindowSession::Setup() {
     picaFrontend.SetPassSpanFallback(
         !std::filesystem::exists(configDirectory / "no_pass_span_fallback", ignored));
   }
+  // Another title (MM3D) has none of OoT3D's menu/message files: degrade to English instead of
+  // aborting (docs/decisiones.md D-016). Any other language-detection error still propagates.
+  std::vector<Oot3dNativeGame::GameLanguage> detectedLanguages;
+  try {
+    detectedLanguages = Oot3dNativeGame::DetectGameLanguages(manifest->RomFsImagePath,
+        manifest->RomFsImageOffset, manifest->RomFsImageSize);
+  } catch (const std::runtime_error& error) {
+    if (std::string_view(error.what()).find("No complete OOT3D menu/message language") ==
+        std::string_view::npos) {
+      throw;
+    }
+    std::fprintf(stderr, "game language: %s; using English\n", error.what());
+    detectedLanguages = {{"en", "English", 1}};
+  }
   languageSettings = std::make_shared<Oot3dNativeGame::GameLanguageSettings>(
       std::filesystem::path(launch.Host.ConfigurationPath).parent_path() / "game_language.json",
-      Oot3dNativeGame::DetectGameLanguages(manifest->RomFsImagePath,
-          manifest->RomFsImageOffset, manifest->RomFsImageSize));
+      std::move(detectedLanguages));
   hostConfig.SystemLanguage = languageSettings->SystemId();
   hostConfig.ResourceLimitValues = manifest->ResourceLimitValues;
   hostConfig.ResourceCurrentValues = manifest->ResourceCurrentValues;
