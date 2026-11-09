@@ -872,6 +872,19 @@ void RunAllTests() {
                 memory.Read32(0x1FF8208C, &aptSession),
             "srv:GetServiceHandle APT:U response is wrong");
 
+    // APT:A is served as an alias of APT:U (MM3D asks for it).
+    Require(memory.Write32(0x1FF82080, 0x00050100) &&
+                memory.Write32(0x1FF82084, 0x3A545041) &&
+                memory.Write32(0x1FF82088, 0x00000041) &&
+                memory.Write32(0x1FF8208C, 5),
+            "cannot write srv:GetServiceHandle APT:A request");
+    state.r[0] = srvSession;
+    uint32_t aptASession = 0;
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF8208C, &aptASession) && aptASession != 0,
+            "srv:GetServiceHandle did not open APT:A");
+
     Require(memory.Write32(0x1FF82080, 0x00050100) &&
                 memory.Write32(0x1FF82084, 0x553A7366) &&
                 memory.Write32(0x1FF82088, 0x00524553) &&

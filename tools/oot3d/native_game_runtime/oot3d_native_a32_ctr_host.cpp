@@ -1342,7 +1342,9 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvcImpl(
                 }
                 event.Name += ":GetServiceHandle:" +
                               std::string(bytes.data(), nameLength);
-                const std::string serviceName(bytes.data(), nameLength);
+                std::string serviceName(bytes.data(), nameLength);
+                // APT:A and APT:S expose the same command set as APT:U; MM3D asks for APT:A.
+                if (serviceName == "APT:A" || serviceName == "APT:S") serviceName = "APT:U";
                 if (serviceName == "APT:U" || serviceName == "fs:USER" ||
                     serviceName == "gsp::Gpu" || serviceName == "dsp::DSP" ||
                     serviceName == "cfg:u" || serviceName == "hid:USER" ||
