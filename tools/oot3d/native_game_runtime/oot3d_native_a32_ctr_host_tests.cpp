@@ -822,6 +822,17 @@ void RunAllTests() {
                 memory.IsMapped(0x14000000, 0x2000),
             "linear ControlMemory commit was not mapped");
 
+    // QueryMemory (svc 0x02): mapped writable block, then an unmapped address.
+    state.r[2] = 0x14000800;
+    Require(host.HandleSvc(0x02, state, memory, context).Action == NativeA32HostAction::Resume &&
+                state.r[0] == 0 && state.r[1] == 0x14000000 && state.r[2] == 0x2000 &&
+                state.r[3] == 3 && state.r[4] == 5,
+            "QueryMemory did not describe the mapped linear block");
+    state.r[2] = 0x30000000;
+    Require(host.HandleSvc(0x02, state, memory, context).Action == NativeA32HostAction::Resume &&
+                state.r[0] == 0 && state.r[3] == 0 && state.r[4] == 0,
+            "QueryMemory did not report an unmapped address as free");
+
     constexpr std::array<uint8_t, 5> portName{'s', 'r', 'v', ':', 0};
     Require(memory.WriteBytes(0x1FF82100, portName),
             "cannot write named port");

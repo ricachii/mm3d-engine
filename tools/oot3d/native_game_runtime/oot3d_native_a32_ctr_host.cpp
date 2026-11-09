@@ -651,6 +651,13 @@ NativeA32HostResult NativeA32CtrHostServices::HandleControlMemory(
 NativeA32HostResult NativeA32CtrHostServices::HandleSvc(
     uint32_t immediate, oot3d::recomp::a32::GuestState& state,
     NativeA32Memory& memory, NativeA32HostContext& context) {
+    // Diagnostic (opt-in): TRIAEVUM_SVC_TRACE=1 prints every SVC with its pc, thread and first arguments.
+    static const bool traceSvc = std::getenv("TRIAEVUM_SVC_TRACE") != nullptr;
+    if (traceSvc) {
+        std::fprintf(stderr, "SVC 0x%02X pc=%08X lr=%08X thread=%u r0=%08X r1=%08X r2=%08X r3=%08X\n",
+                     immediate, state.r[15], state.r[14], static_cast<unsigned>(context.ThreadId),
+                     state.r[0], state.r[1], state.r[2], state.r[3]);
+    }
     auto result = HandleSvcImpl(immediate, state, memory, context);
     if (result.Action == NativeA32HostAction::Wait) {
         const auto* event = mSvcEvents.LastEvent();
@@ -680,6 +687,39 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvcImpl(
     switch (immediate) {
     case 0x01:
         return HandleControlMemory(state, memory, std::move(event));
+    case 0x02: {
+        // QueryMemory (svc 0x02): in r2 = address; out r0 = result, r1 = base, r2 = size, r3 = permission
+        // (1 R, 3 RW, 5 RX), r4 = state, r5 = page flags. The extent is the contiguous run of pages with
+        // the same mapped/writable status around the address (capped to 256 MiB each way). State: 0 free,
+        // 4 code (mapped, read-only), 5 private (mapped, writable). MM3D calls it to bound its stack.
+        event.Name = "QueryMemory";
+        constexpr uint32_t kPage = 0x1000U;
+        constexpr uint32_t kMaxPages = 0x10000U;
+        const uint32_t page = state.r[2] & ~(kPage - 1U);
+        const bool mapped = memory.IsMapped(page, kPage);
+        const bool writable = mapped && memory.IsWritable(page, kPage);
+        const auto same = [&](uint32_t other) {
+            return memory.IsMapped(other, kPage) == mapped &&
+                   (!mapped || memory.IsWritable(other, kPage) == writable);
+        };
+        uint64_t low = page;
+        uint64_t high = static_cast<uint64_t>(page) + kPage;
+        for (uint32_t i = 0; i < kMaxPages && low >= kPage && same(static_cast<uint32_t>(low - kPage)); ++i) {
+            low -= kPage;
+        }
+        for (uint32_t i = 0; i < kMaxPages && high < 0x100000000ULL && same(static_cast<uint32_t>(high)); ++i) {
+            high += kPage;
+        }
+        state.r[0] = kResultSuccess;
+        state.r[1] = static_cast<uint32_t>(low);
+        state.r[2] = static_cast<uint32_t>(high - low);
+        state.r[3] = !mapped ? 0U : (writable ? 3U : 5U);
+        state.r[4] = !mapped ? 0U : (writable ? 5U : 4U);
+        state.r[5] = 0U;
+        event.Handled = true;
+        mSvcEvents.push_back(std::move(event));
+        return {NativeA32HostAction::Resume};
+    }
     case 0x08: {
         event.Name = "CreateThread";
         const uint32_t priority = state.r[0];
