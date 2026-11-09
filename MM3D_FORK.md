@@ -22,3 +22,7 @@ Fork de [TriAevum-Switch](https://github.com/JohnUzoka/TriAevum-Switch), a su ve
 - `upstream-pc`: TriAevum (PC).
 
 Base: `upstream/english` @ `33f53633` (2026-11-08). Notas de trabajo y plan: repositorio `ricachii/mm3d-recomp` (`docs/`).
+
+## Nota sobre nombres
+
+Este repositorio es **`ricachii/mm3d-engine`**. En el equipo de desarrollo vive en `~/mm3d/mm3d-recomp/`, anidado dentro de la carpeta `~/mm3d`, que es otro repositorio (`ricachii/mm3d-recomp`, documentación y notas). Los nombres de carpeta y de repo no coinciden a propósito histórico; ver el README de ese repositorio.
