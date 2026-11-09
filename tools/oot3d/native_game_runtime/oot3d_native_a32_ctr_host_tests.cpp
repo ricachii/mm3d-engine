@@ -1383,6 +1383,14 @@ void RunAllTests() {
                 NativeA32HostAction::Resume &&
                 memory.Read32(0x1FF82080, &response) && response == 0x000D0104,
             "APT:ReceiveParameter after Glance did not answer");
+    Require(memory.Write32(0x1FF82080, 0x00550040) && memory.Write32(0x1FF82084, 1),
+            "cannot write APT:SetScreenCapPostPermission request");
+    state.r[0] = aptSession;
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF82080, &response) && response == 0x00550040 &&
+                memory.Read32(0x1FF82084, &descriptor) && descriptor == 0,
+            "APT:SetScreenCapPostPermission did not answer");
     Require(memory.Write32(0x1FF82100, notificationEvent) &&
                 memory.Write32(0x1FF82104, parameterEvent),
             "cannot write APT event wait array");

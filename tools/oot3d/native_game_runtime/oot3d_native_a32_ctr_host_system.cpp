@@ -226,6 +226,15 @@ NativeA32HostResult NativeA32CtrHostServices::HandleAptRequest(
         mSvcEvents.push_back(std::move(event));
         return {NativeA32HostAction::Resume};
     }
+    // SetScreenCapPostPermission (0x55): one argument (screenshot permission); there is no screen capture to gate.
+    if (event.Detail == 0x00550040U && memory.Write32(commandBuffer, 0x00550040U) &&
+        memory.Write32(commandBuffer + 4U, kResultSuccess)) {
+        state.r[0] = kResultSuccess;
+        event.Name += ":SetScreenCapPostPermission";
+        event.Handled = true;
+        mSvcEvents.push_back(std::move(event));
+        return {NativeA32HostAction::Resume};
+    }
     if (event.Detail == kAptNotifyToWaitRequest &&
         memory.Write32(commandBuffer, kAptNotifyToWaitResponse) &&
         memory.Write32(commandBuffer + 4U, kResultSuccess)) {
