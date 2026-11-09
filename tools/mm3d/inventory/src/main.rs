@@ -72,6 +72,10 @@ fn main() {
         *by_source.entry(source.clone()).or_default() += 1;
         writeln!(out, "0x{:08X},{},{},{},{}", entry, is_thumb as u8, size, f.instructions.len(), source).unwrap();
     }
+    // Mapa de palabras (4 bytes): 1 si 3dsrecomp clasifica la palabra como codigo, 0 si es literal/dato/desconocido.
+    // Sirve para ignorar pools y tablas inline al calcular firmas de funciones.
+    let words: Vec<u8> = (0..analysis.map.len()).step_by(4).map(|i| (analysis.map[i] == discover::Byte::Code) as u8).collect();
+    std::fs::write(format!("{}.map", args[2]), words).expect("no se pudo escribir el mapa");
     eprintln!("texto: base=0x{:08X} fin=0x{:08X}  hash_codigo={:016X}", program.text.base, program.text.end(), hash);
     eprintln!("funciones: {} (antes de hints: {first}); hints aplicados: {applied}", analysis.functions.len());
     eprintln!("thumb: {thumb}");
