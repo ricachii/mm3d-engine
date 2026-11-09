@@ -1,4 +1,5 @@
 #include "oot3d_interior_sun_prebuild.h"
+#include <cstdio>
 #include <cstdlib>
 #include "oot3d_game_language.h"
 #include <array>
@@ -163,7 +164,35 @@ NativeGameArguments PrepareNativeGameArguments(int argc, char** argv) {
 
 } // namespace
 
+#if defined(__linux__) && !defined(__SWITCH__) && !defined(__ANDROID__)
+#include <execinfo.h>
+#include <signal.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+namespace {
+// Diagnostic (opt-in): with TRIAEVUM_BACKTRACE_SIGNAL=1, SIGUSR1 makes the receiving thread print its backtrace.
+// Send it to each thread with tgkill to see where a hung process is waiting (no debugger needed).
+void DumpThreadBacktrace(int) {
+    void* frames[48];
+    const int count = backtrace(frames, 48);
+    char header[64];
+    const int length = std::snprintf(header, sizeof(header), "BT tid=%ld frames=%d\n",
+                                     static_cast<long>(syscall(SYS_gettid)), count);
+    if (length > 0) (void)!write(2, header, static_cast<size_t>(length));
+    backtrace_symbols_fd(frames, count, 2);
+}
+}  // namespace
+#endif
+
 int main(int argc, char** argv) {
+#if defined(__linux__) && !defined(__SWITCH__) && !defined(__ANDROID__)
+    if (std::getenv("TRIAEVUM_BACKTRACE_SIGNAL") != nullptr) {
+        struct sigaction action{};
+        action.sa_handler = DumpThreadBacktrace;
+        sigemptyset(&action.sa_mask);
+        sigaction(SIGUSR1, &action, nullptr);
+    }
+#endif
     try {
         if (argc >= 2 && std::string_view(argv[1]) == "--prebuild-interior-sun")
             return Oot3dNativeGame::InteriorSunToolMain(argc, argv);

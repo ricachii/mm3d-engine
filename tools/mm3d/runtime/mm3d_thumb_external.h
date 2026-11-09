@@ -5,6 +5,9 @@
 // despachador sabe continuar: Returned/Branch con el PC ARM, o MemoryFault/BlockLimit/Unsupported.
 #pragma once
 
+#include <cstdio>
+#include <cstdlib>
+
 #include "mm3d_thumb_interpreter.h"
 #include "oot3d_native_whole_aot_runtime.h"
 
@@ -14,8 +17,14 @@ inline Oot3dWholeAotFlow ExecuteThumbExternalCall(
     uint32_t entry, Oot3dWholeAotFrame& frame, NativeA32Memory& memory) {
     // Presupuesto por llamada; al agotarse se devuelve BlockLimit con el PC Thumb (bit 0) y se reanuda desde fuera.
     constexpr uint32_t kThumbInstructionBudget = 1U << 22;
+    // Diagnostic (opt-in): TRIAEVUM_THUMB_TRACE=1 prints every Thumb entry and how the interpreter left it.
+    static const bool trace = std::getenv("TRIAEVUM_THUMB_TRACE") != nullptr;
     const mm3d::thumb::Result result =
         mm3d::thumb::Run(frame.Guest, memory, entry, kThumbInstructionBudget);
+    if (trace) {
+        std::fprintf(stderr, "THUMB entry=%08X lr=%08X -> kind=%u pc=%08X detail=%08X\n", entry,
+                     frame.Guest.r[14], static_cast<unsigned>(result.kind), result.pc, result.detail);
+    }
     switch (result.kind) {
     case mm3d::thumb::Exit::Return:
         return Oot3dAotReturned(result.pc);
