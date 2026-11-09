@@ -1362,6 +1362,27 @@ void RunAllTests() {
                 memory.Read32(0x1FF82090, &parameterEvent) &&
                 notificationEvent != 0 && parameterEvent != 0,
             "APT:Initialize event response is wrong");
+    // GlanceParameter (0x0E) reports the pending Wakeup without consuming it.
+    Require(memory.Write32(0x1FF82180, (0x20U << 14U) | 2U) &&
+                memory.Write32(0x1FF82184, 0x1FF82200) &&
+                memory.Write32(0x1FF82080, 0x000E0080) &&
+                memory.Write32(0x1FF82084, 0x300) &&
+                memory.Write32(0x1FF82088, 0x20),
+            "cannot write APT:GlanceParameter request");
+    state.r[0] = aptSession;
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF82080, &response) && response == 0x000E0104,
+            "APT:GlanceParameter did not answer");
+    Require(memory.Write32(0x1FF82080, 0x000D0080) &&
+                memory.Write32(0x1FF82084, 0x300) &&
+                memory.Write32(0x1FF82088, 0x20),
+            "cannot write APT:ReceiveParameter request");
+    state.r[0] = aptSession;
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF82080, &response) && response == 0x000D0104,
+            "APT:ReceiveParameter after Glance did not answer");
     Require(memory.Write32(0x1FF82100, notificationEvent) &&
                 memory.Write32(0x1FF82104, parameterEvent),
             "cannot write APT event wait array");

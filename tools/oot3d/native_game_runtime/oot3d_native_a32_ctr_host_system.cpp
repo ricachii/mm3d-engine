@@ -235,7 +235,9 @@ NativeA32HostResult NativeA32CtrHostServices::HandleAptRequest(
         mSvcEvents.push_back(std::move(event));
         return {NativeA32HostAction::Resume};
     }
-    if (event.Detail == kAptReceiveParameterRequest &&
+    // GlanceParameter (0x0E) answers like ReceiveParameter but leaves the pending Wakeup in place.
+    const bool aptGlance = event.Detail == kAptGlanceParameterRequest;
+    if ((event.Detail == kAptReceiveParameterRequest || aptGlance) &&
         mAptWakeupPending) {
         uint32_t appletId = 0;
         uint32_t bufferSize = 0;
@@ -252,7 +254,8 @@ NativeA32HostResult NativeA32CtrHostServices::HandleAptRequest(
             (staticDescriptor >> 14U) >= bufferSize &&
             memory.Fill(staticAddress, bufferSize, 0) &&
             memory.Write32(commandBuffer,
-                           kAptReceiveParameterResponse) &&
+                           aptGlance ? kAptGlanceParameterResponse
+                                     : kAptReceiveParameterResponse) &&
             memory.Write32(commandBuffer + 4U, kResultSuccess) &&
             memory.Write32(commandBuffer + 8U, 0U) &&
             memory.Write32(commandBuffer + 12U, 1U) &&
@@ -263,9 +266,9 @@ NativeA32HostResult NativeA32CtrHostServices::HandleAptRequest(
             memory.Write32(commandBuffer + 28U,
                            (bufferSize << 14U) | 2U) &&
             memory.Write32(commandBuffer + 32U, staticAddress)) {
-            mAptWakeupPending = false;
+            if (!aptGlance) mAptWakeupPending = false;
             state.r[0] = kResultSuccess;
-            event.Name += ":ReceiveParameter:Wakeup";
+            event.Name += aptGlance ? ":GlanceParameter:Wakeup" : ":ReceiveParameter:Wakeup";
             event.Handled = true;
             mSvcEvents.push_back(std::move(event));
             return {NativeA32HostAction::Resume};
