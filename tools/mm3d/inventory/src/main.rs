@@ -74,6 +74,34 @@ fn main() {
     }
     // Mapa de palabras (4 bytes): 1 si 3dsrecomp clasifica la palabra como codigo, 0 si es literal/dato/desconocido.
     // Sirve para ignorar pools y tablas inline al calcular firmas de funciones.
+    // Mapa de modos por media-palabra (2 bytes): 0 sin clasificar, 1 instruccion ARM, 2 instruccion Thumb, 3 ambos.
+    // Para Thumb tambien se marca la segunda mitad de los pares BL/BLX (primera mitad 0xF000..0xF7FF).
+    let mut modes = vec![0u8; program.text.bytes.len() / 2];
+    let text_base = program.text.base;
+    let mut mark = |address: u32, mode: u8| {
+        let index = (address.wrapping_sub(text_base) / 2) as usize;
+        if index < modes.len() {
+            modes[index] = if modes[index] == 0 || modes[index] == mode { mode } else { 3 };
+        }
+    };
+    for (&entry, f) in &analysis.functions {
+        for &a in &f.instructions {
+            if f.mode == Mode::Thumb {
+                let h = a & !1;
+                mark(h, 2);
+                if let Some(first) = program.text.read16(h) {
+                    if (0xF000..0xF800).contains(&first) {
+                        mark(h + 2, 2);
+                    }
+                }
+            } else {
+                mark(a, 1);
+                mark(a + 2, 1);
+            }
+        }
+        let _ = entry;
+    }
+    std::fs::write(format!("{}.modes", args[2]), modes).expect("no se pudo escribir el mapa de modos");
     let words: Vec<u8> = (0..analysis.map.len()).step_by(4).map(|i| (analysis.map[i] == discover::Byte::Code) as u8).collect();
     std::fs::write(format!("{}.map", args[2]), words).expect("no se pudo escribir el mapa");
     eprintln!("texto: base=0x{:08X} fin=0x{:08X}  hash_codigo={:016X}", program.text.base, program.text.end(), hash);
