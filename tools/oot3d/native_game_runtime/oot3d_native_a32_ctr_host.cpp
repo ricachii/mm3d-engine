@@ -659,6 +659,12 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvc(
                      state.r[0], state.r[1], state.r[2], state.r[3]);
     }
     auto result = HandleSvcImpl(immediate, state, memory, context);
+    if (traceSvc) {
+        if (const auto* last = mSvcEvents.LastEvent()) {
+            std::fprintf(stderr, "  -> %s action=%d handled=%d\n", last->Name.c_str(),
+                         static_cast<int>(result.Action), last->Handled ? 1 : 0);
+        }
+    }
     if (result.Action == NativeA32HostAction::Wait) {
         const auto* event = mSvcEvents.LastEvent();
         if (!event || !event->Handled) {
