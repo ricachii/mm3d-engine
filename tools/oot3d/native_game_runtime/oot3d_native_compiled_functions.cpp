@@ -1,4 +1,5 @@
 #include "oot3d_native_compiled_functions.h"
+#include "mm3d_thumb_external.h"
 
 #include "oot3d_native_a32_memory.h"
 #include "oot3d_native_a32_second_core.h"
@@ -982,6 +983,10 @@ Oot3dWholeAotFlow ExecuteWholeAotExternalCall(
     uint32_t entry,
     Oot3dWholeAotFrame& frame,
     NativeA32Memory& memory) {
+    // Entrada con el bit 0 activo = codigo Thumb (BLX <imm> o destino indirecto): intérprete del host.
+    if ((entry & 1U) != 0U) {
+        return ExecuteThumbExternalCall(entry, frame, memory);
+    }
     auto& state = frame.Guest;
     state.r[15] = entry;
     oot3d::recomp::a32::ExecutionResult result{};
@@ -1016,7 +1021,10 @@ Oot3dWholeAotFlow ExecuteWholeAotExternalCall(
 }
 
 Oot3dWholeAotFlow ContinueWholeAotExternalCallInGuest(
-    uint32_t entry, Oot3dWholeAotFrame&, NativeA32Memory&) {
+    uint32_t entry, Oot3dWholeAotFrame& frame, NativeA32Memory& memory) {
+    if ((entry & 1U) != 0U) {
+        return ExecuteThumbExternalCall(entry, frame, memory);
+    }
     return Oot3dAotBranch(entry);
 }
 

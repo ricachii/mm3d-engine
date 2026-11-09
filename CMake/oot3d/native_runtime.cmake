@@ -320,6 +320,7 @@ add_library(oot3d_native_a32_process STATIC EXCLUDE_FROM_ALL
 )
 target_include_directories(oot3d_native_a32_process PUBLIC
     tools/oot3d/native_game_runtime
+    tools/mm3d/runtime
 )
 target_link_libraries(oot3d_native_a32_process PUBLIC
     oot3d_typed_gameplay
