@@ -37,6 +37,17 @@ NativeA32HostResult NativeA32CtrHostServices::HandleNdmRequest(
         mSvcEvents.push_back(std::move(event));
         return {NativeA32HostAction::Resume};
     }
+    // SuspendDaemons (0x06), ResumeDaemons (0x07) and OverrideDefaultDaemons (0x14): one argument, a daemon
+    // bitmask; there are no network daemons to control, so they succeed without effect.
+    if ((event.Detail == 0x00060040U || event.Detail == 0x00070040U || event.Detail == 0x00140040U) &&
+        memory.Write32(commandBuffer, event.Detail) &&
+        memory.Write32(commandBuffer + 4U, kResultSuccess)) {
+        state.r[0] = kResultSuccess;
+        event.Name += ":DaemonMask";
+        event.Handled = true;
+        mSvcEvents.push_back(std::move(event));
+        return {NativeA32HostAction::Resume};
+    }
     mSvcEvents.push_back(std::move(event));
     return {NativeA32HostAction::Wait};
 }

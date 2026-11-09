@@ -907,6 +907,33 @@ void RunAllTests() {
                 memory.Read32(0x1FF82080, &response) &&
                 response == 0x08010040,
             "FS:Initialize response is wrong");
+    uint32_t fsResult = 1;
+    Require(memory.Write32(0x1FF82080, 0x08610042) &&
+                memory.Write32(0x1FF82084, 0x00010000) &&
+                memory.Write32(0x1FF82088, 0x20) &&
+                memory.Write32(0x1FF8208C, 0),
+            "cannot write FS:InitializeWithSdkVersion request");
+    state.r[0] = fsSession;
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF82080, &response) && response == 0x08610040 &&
+                memory.Read32(0x1FF82084, &fsResult) && fsResult == 0,
+            "FS:InitializeWithSdkVersion response is wrong");
+    Require(memory.Write32(0x1FF82080, 0x08620040) && memory.Write32(0x1FF82084, 0),
+            "cannot write FS:SetPriority request");
+    state.r[0] = fsSession;
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF82080, &response) && response == 0x08620040,
+            "FS:SetPriority response is wrong");
+    Require(memory.Write32(0x1FF82080, 0x08630000),
+            "cannot write FS:GetPriority request");
+    state.r[0] = fsSession;
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF82080, &response) && response == 0x08630080 &&
+                memory.Read32(0x1FF82084, &fsResult) && fsResult == 0,
+            "FS:GetPriority response is wrong");
 
     Require(memory.Fill(0x1FF82120, 1, 0) &&
                 memory.Write32(0x1FF82080, 0x080C00C2) &&

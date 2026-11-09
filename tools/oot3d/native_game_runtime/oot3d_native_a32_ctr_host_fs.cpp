@@ -413,6 +413,33 @@ NativeA32HostResult NativeA32CtrHostServices::HandleFsRequest(
             return {NativeA32HostAction::Resume};
         }
     }
+    // InitializeWithSdkVersion (0x0861: sdk version, calling pid) and SetPriority (0x0862: priority), both sent
+    // by MM3D at start-up. The host serves all processes at the same priority, so both just succeed.
+    // GetPriority (0x0863): reply is result + the priority last set (always 0 here).
+    if (event.Detail == 0x08630000U && memory.IsWritable(commandBuffer, 12U) &&
+        memory.Write32(commandBuffer, 0x08630080U) &&
+        memory.Write32(commandBuffer + 4U, kResultSuccess) &&
+        memory.Write32(commandBuffer + 8U, 0U)) {
+        state.r[0] = kResultSuccess;
+        event.Name += ":GetPriority";
+        event.Handled = true;
+        mSvcEvents.push_back(std::move(event));
+        return {NativeA32HostAction::Resume};
+    }
+    if (event.Detail == 0x08610042U || event.Detail == 0x08620040U) {
+        const bool sdk = event.Detail == 0x08610042U;
+        uint32_t descriptor = 0;
+        if ((!sdk || (memory.Read32(commandBuffer + 8U, &descriptor) &&
+                      descriptor == kCallingPidDescriptor)) &&
+            memory.Write32(commandBuffer, sdk ? 0x08610040U : 0x08620040U) &&
+            memory.Write32(commandBuffer + 4U, kResultSuccess)) {
+            state.r[0] = kResultSuccess;
+            event.Name += sdk ? ":InitializeWithSdkVersion" : ":SetPriority";
+            event.Handled = true;
+            mSvcEvents.push_back(std::move(event));
+            return {NativeA32HostAction::Resume};
+        }
+    }
     if (event.Detail == kFsOpenFileDirectlyRequest) {
         std::array<uint32_t, 12> words{};
         bool readable = true;
