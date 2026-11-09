@@ -137,6 +137,11 @@ def main(argv: Sequence[str] | None = None) -> int:
              "constant, like LDR literals: no page-flag check, load or fault "
              "path (same values)",
     )
+    parser.add_argument(
+        "--trap-unsupported", action="store_true",
+        help="an instruction that cannot be lowered becomes a runtime trap (Unsupported flow) instead of "
+             "aborting its function; listed in the manifest as trapped_instructions (use for data decoded as code)",
+    )
     args = parser.parse_args(argv)
     if args.shards <= 0:
         parser.error("--shards must be positive")
@@ -164,6 +169,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         sparse_block_entries=args.sparse_block_entries,
         hook_gates=load_hook_gates(args.hook_gates) if args.sparse_block_entries else None,
         fold_vfp_literals=args.fold_vfp_literals,
+        trap_unsupported=args.trap_unsupported,
     )
     if args.guest_overrides is not None:
         from apply_guest_overrides import apply as apply_overrides, load_manifest

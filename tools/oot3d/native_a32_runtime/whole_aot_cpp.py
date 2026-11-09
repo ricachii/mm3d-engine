@@ -876,6 +876,31 @@ def _emit_exclusive(item: Instruction) -> list[str]:
     return _conditional(raw, body)
 
 
+# --trap-unsupported: an instruction that cannot be lowered does not abort its whole function; it becomes a runtime
+# trap (Unsupported flow with the pc and the instruction word) and is listed in the manifest. This matters for data
+# decoded as code (inline constants after a BL, literal pools, ASCII) in otherwise valid functions. Errors about
+# resolving calls/edges are never trapped: they must keep failing so the selection closure stays honest.
+_TRAP_UNSUPPORTED = False
+_TRAPPED: list[dict[str, object]] = []
+_NON_TRAPPABLE = (
+    "not selected or external", "no matching program edge", "must be declared external",
+    "no unique fallthrough", "no unique resume", "is outside code.bin", "is not external",
+)
+
+
+def _trappable(error: LoweringError) -> bool:
+    return _TRAP_UNSUPPORTED and not any(marker in str(error) for marker in _NON_TRAPPABLE)
+
+
+def _trap_lines(item: Instruction, error: LoweringError) -> list[str]:
+    _TRAPPED.append({"pc": item.pc, "raw": f"0x{item.raw:08X}", "reason": str(error)[:120]})
+    return [
+        f"// trapped: {str(error)[:100]}",
+        "commitState();",
+        f"return {{Oot3dWholeAotFlowKind::Unsupported, 0x{item.pc:08X}U, 0x{item.raw:08X}U}};",
+    ]
+
+
 def _emit_media_dual(item: Instruction) -> list[str]:
     """SMLAD/SMLADX/SMLSD/SMLSDX and SMUAD/SMUADX/SMUSD/SMUSDX (32-bit dual 16x16 multiplies)."""
     raw = item.raw
@@ -2172,6 +2197,43 @@ def _emit_terminal(
                 f"hint block 0x{block.pc:08X} has no unique fallthrough"
             )
         return [*lines, _goto(int(fallthrough_edges[0]["target"]), block_pcs)]
+    if (raw & 0xFE000000) == 0xFA000000:
+        # BLX <imm>: ARM -> Thumb call. The callee is Thumb code the generator does not
+        # compile, so it must be declared `external` (host interpreter). The entry passed to
+        # the host has bit 0 set so it can tell a Thumb entry from an ARM one.
+        target = (_branch_target(pc, raw) + (((raw >> 24) & 1) << 1)) & 0xFFFFFFFF
+        recorded_target = direct_calls.get(pc)
+        if recorded_target != target:
+            raise LoweringError(f"BLX call at 0x{pc:08X} has no matching program edge")
+        if target not in external_entries:
+            raise LoweringError(
+                f"BLX call target 0x{target:08X} is Thumb code and must be declared external"
+            )
+        return_pc = pc + 4
+        thumb_entry = target | 1
+        if promote:
+            call = f"Oot3dAotCallExternal(context, 0x{thumb_entry:08X}U, frame, state)"
+            call_prefix = ["commitState();"]
+            call_suffix = ["reloadState();"]
+        else:
+            call = (
+                f"Oot3dAotCallExternal(context, 0x{thumb_entry:08X}U, frame, state, "
+                "commitState, reloadState)"
+            )
+            call_prefix = []
+            call_suffix = []
+        return [
+            "OOT3D_AOT_STAT(context.Stats.DirectCalls);",
+            f"state.R[14] = 0x{return_pc:08X}U;",
+            *call_prefix,
+            f"const Oot3dWholeAotFlow callFlow = {call};",
+            *call_suffix,
+            "if (callFlow.Kind != Oot3dWholeAotFlowKind::Returned ||",
+            f"    callFlow.Pc != 0x{return_pc:08X}U) {{",
+            "    return callFlow;",
+            "}",
+            _goto(return_pc, block_pcs),
+        ]
     if (raw & 0x0E000000) == 0x0A000000 and ((raw >> 28) & 0xF) != 0xF:
         if raw & (1 << 24):
             target = _branch_target(pc, raw)
@@ -2523,23 +2585,39 @@ def _render_function(
     bodies: dict[int, list[str]] = {}
     for block in function.blocks:
         body: list[str] = []
+        trapped_block = False
         for item in block.instructions[:-1]:
             live_flags = instruction_optimization[item.pc].required_flag_writes
-            for emitted in _emit_non_control(item, live_flags):
+            try:
+                emitted_lines = _emit_non_control(item, live_flags)
+            except LoweringError as error:
+                if not _trappable(error):
+                    raise
+                body.extend("        " + line for line in _trap_lines(item, error))
+                trapped_block = True
+                break  # the rest of the block is unreachable
+            for emitted in emitted_lines:
                 body.append("        " + emitted)
-        terminal_flags = instruction_optimization[
-            block.instructions[-1].pc
-        ].required_flag_writes
-        for emitted in _emit_terminal(
-            block,
-            block_pcs,
-            dict(function.direct_calls),
-            function_symbols,
-            external_entries,
-            terminal_flags,
-            promote=promote,
-        ):
-            body.append("        " + emitted)
+        if not trapped_block:
+            terminal_flags = instruction_optimization[
+                block.instructions[-1].pc
+            ].required_flag_writes
+            try:
+                terminal_lines = _emit_terminal(
+                    block,
+                    block_pcs,
+                    dict(function.direct_calls),
+                    function_symbols,
+                    external_entries,
+                    terminal_flags,
+                    promote=promote,
+                )
+            except LoweringError as error:
+                if not _trappable(error):
+                    raise
+                terminal_lines = _trap_lines(block.instructions[-1], error)
+            for emitted in terminal_lines:
+                body.append("        " + emitted)
         bodies[block.pc] = body
     dispatch = (function.entry, *_function_dispatch_entries(function))
     lines.append("    switch (entryPc) {")
@@ -3998,6 +4076,7 @@ def generate(
     sparse_block_entries: bool = False,
     hook_gates: frozenset[int] | None = None,
     fold_vfp_literals: bool = False,
+    trap_unsupported: bool = False,
 ) -> dict[str, object]:
     """``giant_function_instructions`` > 0 marks the functions with at least
     that many guest instructions, except those in ``hot_entries`` (profile), with
@@ -4009,6 +4088,9 @@ def generate(
     global _LITERAL_IMAGE, _NATIVE_VFP_AARCH64, _GIANT_COLD_ENTRIES
     global _VFP_ZERO_AWARE, _LEAN_STACK, _PROMOTE_REGISTERS
     global _SPARSE_BLOCK_ENTRIES, _HOOK_GATES, _FOLD_VFP_LITERALS
+    global _TRAP_UNSUPPORTED, _TRAPPED
+    _TRAP_UNSUPPORTED = trap_unsupported
+    _TRAPPED = []
     if vfp_zero_aware and not native_vfp_aarch64:
         raise ValueError("--vfp-zero-aware requires --native-vfp-aarch64")
     if sparse_block_entries:
@@ -4026,6 +4108,7 @@ def generate(
         **({"sparse_block_entries": True,
             "hook_gates": sorted(hook_gates or ())} if sparse_block_entries else {}),
         **({"fold_vfp_literals": True} if fold_vfp_literals else {}),
+        **({"trap_unsupported": True} if trap_unsupported else {}),
     }
     if giant_function_instructions < 0:
         raise ValueError("giant function threshold must not be negative")
@@ -4100,7 +4183,7 @@ def generate(
         ) and all(
             cached.get(key, False) == (key in option_contract)
             for key in ("vfp_zero_aware", "lean_stack", "sparse_block_entries",
-                        "fold_vfp_literals")
+                        "fold_vfp_literals", "trap_unsupported")
         ) and all(
             (output / name).is_file() and
             _sha256((output / name).read_bytes()) == digest
@@ -4268,6 +4351,7 @@ def _generate_files(
         "literal_folding": fold_literals,
         **({"native_vfp_aarch64": True} if _NATIVE_VFP_AARCH64 else {}),
         **({"register_promotion": True} if _PROMOTE_REGISTERS else {}),
+        **({"trapped_instructions": list(_TRAPPED)} if _TRAP_UNSUPPORTED else {}),
         **(giant_contract or {}),
         **(
             {"giant_cold_functions": sorted(_GIANT_COLD_ENTRIES)}

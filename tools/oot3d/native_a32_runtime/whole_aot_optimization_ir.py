@@ -212,6 +212,12 @@ def instruction_effects(raw: int) -> ArchitecturalEffects:
             gpr_reads, gpr_writes, flag_reads, flag_writes, predicated
         )
 
+    if (raw & 0xFE000000) == 0xFA000000:  # BLX <imm> (ARM -> Thumb call): writes LR like BL
+        gpr_writes |= _reg(14)
+        return ArchitecturalEffects(
+            gpr_reads, gpr_writes, flag_reads, flag_writes, predicated
+        )
+
     if (raw & 0x0E000000) == 0x0A000000 and condition != 0xF:
         if raw & (1 << 24):
             gpr_writes |= _reg(14)
