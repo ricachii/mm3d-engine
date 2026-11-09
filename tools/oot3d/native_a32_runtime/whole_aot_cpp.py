@@ -876,6 +876,160 @@ def _emit_exclusive(item: Instruction) -> list[str]:
     return _conditional(raw, body)
 
 
+def _emit_media_dual(item: Instruction) -> list[str]:
+    """SMLAD/SMLADX/SMLSD/SMLSDX and SMUAD/SMUADX/SMUSD/SMUSDX (32-bit dual 16x16 multiplies)."""
+    raw = item.raw
+    pc = item.pc
+    form = raw & 0x0FF000D0
+    if form not in {0x07000010, 0x07000050}:
+        raise LoweringError(f"media instruction 0x{raw:08X} at 0x{pc:08X} is unsupported")
+    rd = (raw >> 16) & 0xF
+    ra = (raw >> 12) & 0xF  # 15 selects SMUAD/SMUSD (no accumulate)
+    rm = (raw >> 8) & 0xF
+    rn = raw & 0xF
+    if 15 in {rd, rm, rn}:
+        raise LoweringError(f"dual multiply uses PC at 0x{pc:08X}")
+    exchange = bool(raw & (1 << 5))
+    operator = "-" if form == 0x07000050 else "+"
+    low_shift = 16 if exchange else 0
+    high_shift = 0 if exchange else 16
+    body = [
+        f"const uint32_t left = {_reg(rn)};",
+        f"const uint32_t right = {_reg(rm)};",
+        "const int64_t lowProduct = static_cast<int64_t>(static_cast<int16_t>(left)) *",
+        f"    static_cast<int16_t>(right >> {low_shift}U);",
+        "const int64_t highProduct = static_cast<int64_t>(static_cast<int16_t>(left >> 16U)) *",
+        f"    static_cast<int16_t>(right >> {high_shift}U);",
+        f"int64_t result = lowProduct {operator} highProduct;",
+    ]
+    if ra != 15:
+        body.append(f"result += static_cast<int32_t>({_reg(ra)});")
+    body.extend(
+        [
+            "const uint32_t value = static_cast<uint32_t>(result);",
+            f"{_reg(rd)} = value;",
+            "Oot3dAotSetSaturationFlag(frame, result != static_cast<int32_t>(value));",
+        ]
+    )
+    return _conditional(raw, body)
+
+
+_PARALLEL_LANES = {
+    0: ((0, 0, 0, "+"), (1, 1, 1, "+")),  # ADD16
+    1: ((0, 0, 1, "-"), (1, 1, 0, "+")),  # ASX
+    2: ((0, 0, 1, "+"), (1, 1, 0, "-")),  # SAX
+    3: ((0, 0, 0, "-"), (1, 1, 1, "-")),  # SUB16
+    4: tuple((lane, lane, lane, "+") for lane in range(4)),  # ADD8
+    7: tuple((lane, lane, lane, "-") for lane in range(4)),  # SUB8
+}
+# prefix (bits 22:20) -> (signed, mode). GE flags are not modelled: MM3D has no SEL.
+_PARALLEL_PREFIX = {
+    1: (True, "modular"), 2: (True, "saturate"), 3: (True, "halve"),
+    5: (False, "modular"), 6: (False, "saturate"), 7: (False, "halve"),
+}
+
+
+def _emit_parallel_arithmetic(item: Instruction) -> list[str]:
+    """ARMv6 parallel add/subtract: S/Q/SH/U/UQ/UH x ADD16/ASX/SAX/SUB16/ADD8/SUB8.
+
+    The GE flags written by the S* and U* forms are deliberately not modelled (nothing
+    reads them without SEL). Tracked in docs/decisiones.md."""
+    raw = item.raw
+    pc = item.pc
+    prefix = (raw >> 20) & 7
+    operation = (raw >> 5) & 7
+    if prefix not in _PARALLEL_PREFIX or operation not in _PARALLEL_LANES:
+        raise LoweringError(f"parallel arithmetic 0x{raw:08X} at 0x{pc:08X} is unsupported")
+    rn = (raw >> 16) & 0xF
+    rd = (raw >> 12) & 0xF
+    rm = raw & 0xF
+    if 15 in {rn, rd, rm}:
+        raise LoweringError(f"parallel arithmetic uses PC at 0x{pc:08X}")
+    signed, mode = _PARALLEL_PREFIX[prefix]
+    width = 8 if operation in (4, 7) else 16
+    mask = (1 << width) - 1
+    value_type = f"{'' if signed else 'u'}int{width}_t"
+    body = [
+        f"const uint32_t left = {_reg(rn)};",
+        f"const uint32_t right = {_reg(rm)};",
+        "uint32_t value = 0U;",
+    ]
+    for destination, left_lane, right_lane, sign in _PARALLEL_LANES[operation]:
+        left_value = f"static_cast<int32_t>(static_cast<{value_type}>(left >> {left_lane * width}U))"
+        right_value = f"static_cast<int32_t>(static_cast<{value_type}>(right >> {right_lane * width}U))"
+        body.append("{")
+        body.append(f"    const int32_t a = {left_value};")
+        body.append(f"    const int32_t b = {right_value};")
+        body.append(f"    int32_t r = a {sign} b;")
+        if mode == "saturate":
+            low = -(1 << (width - 1)) if signed else 0
+            high = (1 << (width - 1)) - 1 if signed else mask
+            body.append(f"    if (r < {low}) {{ r = {low}; }} else if (r > {high}) {{ r = {high}; }}")
+        elif mode == "halve":
+            body.append("    r >>= 1;")
+        body.append(
+            f"    value |= (static_cast<uint32_t>(r) & 0x{mask:X}U) << {destination * width}U;"
+        )
+        body.append("}")
+    body.append(f"{_reg(rd)} = value;")
+    return _conditional(raw, body)
+
+
+def _emit_saturate16(item: Instruction) -> list[str]:
+    """SSAT16 / USAT16: saturate both signed halfwords of Rn."""
+    raw = item.raw
+    pc = item.pc
+    signed = (raw & 0x0FF00FF0) == 0x06A00F30
+    rd = (raw >> 12) & 0xF
+    rm = raw & 0xF
+    if 15 in {rd, rm}:
+        raise LoweringError(f"saturate16 uses PC at 0x{pc:08X}")
+    field = (raw >> 16) & 0xF
+    if signed:
+        bits = field + 1
+        low, high = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+    else:
+        low, high = 0, (1 << field) - 1
+    body = [f"const uint32_t source = {_reg(rm)};", "uint32_t value = 0U;", "bool saturated = false;"]
+    for lane in range(2):
+        body.extend(
+            [
+                "{",
+                f"    int32_t v = static_cast<int16_t>(source >> {lane * 16}U);",
+                f"    if (v < {low}) {{ v = {low}; saturated = true; }}",
+                f"    else if (v > {high}) {{ v = {high}; saturated = true; }}",
+                f"    value |= (static_cast<uint32_t>(v) & 0xFFFFU) << {lane * 16}U;",
+                "}",
+            ]
+        )
+    body.extend([f"{_reg(rd)} = value;", "Oot3dAotSetSaturationFlag(frame, saturated);"])
+    return _conditional(raw, body)
+
+
+def _emit_extend_add16(item: Instruction) -> list[str]:
+    """SXTAB16 / UXTAB16: add the zero/sign-extended bytes 0 and 2 of the rotated Rm to the halfwords of Rn."""
+    raw = item.raw
+    pc = item.pc
+    unsigned = (raw & 0x0FF000F0) == 0x06C00070
+    rn = (raw >> 16) & 0xF
+    rd = (raw >> 12) & 0xF
+    rm = raw & 0xF
+    if 15 in {rn, rd, rm}:
+        raise LoweringError(f"extend-and-add uses PC at 0x{pc:08X}")
+    rotate = ((raw >> 10) & 0x3) * 8
+    byte_type = "uint8_t" if unsigned else "int8_t"
+    return _conditional(
+        raw,
+        [
+            f"const uint32_t source = Oot3dAotRor({_reg(rm, pc)}, {rotate}U);",
+            f"const uint32_t base = {_reg(rn, pc)};",
+            f"const uint32_t low = (base + static_cast<uint16_t>(static_cast<{byte_type}>(source))) & 0xFFFFU;",
+            f"const uint32_t high = ((base >> 16U) + static_cast<uint16_t>(static_cast<{byte_type}>(source >> 16U))) & 0xFFFFU;",
+            f"{_reg(rd)} = low | (high << 16U);",
+        ],
+    )
+
+
 def _emit_extension(item: Instruction) -> list[str]:
     raw = item.raw
     pc = item.pc
@@ -990,6 +1144,12 @@ def _emit_extension(item: Instruction) -> list[str]:
                 f"{_reg(rd)} = value;",
             ],
         )
+    if (raw & 0x0F800F10) == 0x06000F10:  # parallel add/subtract family
+        return _emit_parallel_arithmetic(item)
+    if (raw & 0x0FA00FF0) == 0x06A00F30:  # SSAT16 (0x06A..) / USAT16 (0x06E..)
+        return _emit_saturate16(item)
+    if (raw & 0x0FB000F0) == 0x06800070 and ((raw >> 16) & 0xF) != 15:  # SXTAB16 / UXTAB16
+        return _emit_extend_add16(item)
     extension = raw & 0x0FF000F0
     signed = extension in {0x06800070, 0x06A00070, 0x06B00070}
     unsigned = extension in {0x06C00070, 0x06E00070, 0x06F00070}
@@ -1924,6 +2084,11 @@ def _emit_non_control(
         return _emit_block_transfer(item)
     if (raw & 0x0F000010) == 0x06000010:
         return _emit_extension(item)
+    if (raw & 0x0F000010) == 0x07000010:
+        # Media space (bits 27:24 = 0111, bit 4 = 1): SMLAD/SMUAD, USAD8, ... Nothing
+        # in it is a load/store. Without this guard _emit_single_memory accepted it as
+        # a register-offset STR/LDR and silently produced wrong code (MM3D: SMLAD).
+        return _emit_media_dual(item)
     if (raw & 0x0C000000) == 0x04000000:
         return _emit_single_memory(item)
     if (raw & 0x0C000000) == 0x0C000000:
