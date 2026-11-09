@@ -833,6 +833,12 @@ void RunAllTests() {
                 state.r[0] == 0 && state.r[3] == 0 && state.r[4] == 0,
             "QueryMemory did not report an unmapped address as free");
 
+    // GetThreadId (svc 0x37): the current-thread pseudo handle.
+    state.r[1] = 0xFFFF8000;
+    Require(host.HandleSvc(0x37, state, memory, context).Action == NativeA32HostAction::Resume &&
+                state.r[0] == 0 && state.r[1] == context.ThreadId,
+            "GetThreadId did not return the current thread id");
+
     constexpr std::array<uint8_t, 5> portName{'s', 'r', 'v', ':', 0};
     Require(memory.WriteBytes(0x1FF82100, portName),
             "cannot write named port");
@@ -1282,6 +1288,12 @@ void RunAllTests() {
             "APT:GetLockHandle response payload is wrong");
     Require(memory.Write32(0x1FF82100, lockHandle),
             "cannot write APT lock wait array");
+    state.r[0] = lockHandle;
+    state.r[2] = 0xFFFFFFFFU;
+    state.r[3] = 0xFFFFFFFFU;
+    Require(host.HandleSvc(0x24, state, memory, context).Action ==
+                NativeA32HostAction::Resume && state.r[0] == 0,
+            "WaitSynchronization1 did not acquire the available APT lock");
     state.r[1] = 0x1FF82100;
     state.r[2] = 1;
     state.r[3] = 0;

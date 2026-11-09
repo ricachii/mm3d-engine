@@ -1078,6 +1078,36 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvcImpl(
         state.r[0] = kResultSuccess;
         mSvcEvents.push_back(std::move(event));
         return {NativeA32HostAction::Resume};
+    case 0x24: {
+        // WaitSynchronization1 (svc 0x24): r0 = handle. Same wake-up rules as WaitSynchronizationN with one handle.
+        event.Name = "WaitSynchronization1";
+        const auto* record = LookupHandle(state.r[0]);
+        if (record == nullptr || record->Object == nullptr) {
+            mSvcEvents.push_back(std::move(event));
+            return {NativeA32HostAction::Wait};
+        }
+        event.Name += ":0x";
+        AppendHex8(event.Name, state.r[0]);
+        event.Name += '=';
+        event.Name += record->Object->Type;
+        event.Detail = state.r[0];
+        if (IsKernelObjectReady(*record->Object, context.ThreadId, context.Process)) {
+            AcquireKernelObject(*record->Object, context.ThreadId);
+            state.r[0] = kResultSuccess;
+            event.Handled = true;
+            mSvcEvents.push_back(std::move(event));
+            return {NativeA32HostAction::Resume};
+        }
+        SynchronizationWaiter waiter;
+        waiter.Process = &context.Process;
+        waiter.ThreadId = context.ThreadId;
+        waiter.WaitAll = false;
+        waiter.Objects.push_back(record->Object);
+        mSynchronizationWaiters.push_back(std::move(waiter));
+        event.Handled = true;
+        mSvcEvents.push_back(std::move(event));
+        return {NativeA32HostAction::Wait};
+    }
     case 0x25: {
         event.Name = "WaitSynchronizationN";
         const uint32_t handlesAddress = state.r[1];
@@ -1168,6 +1198,26 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvcImpl(
         event.Handled = true;
         mSvcEvents.push_back(std::move(event));
         return {NativeA32HostAction::Resume};
+    case 0x37: {
+        // GetThreadId (svc 0x37): in r1 = thread handle; out r0 = result, r1 = thread id.
+        event.Name = "GetThreadId";
+        std::optional<uint32_t> threadId;
+        if (state.r[1] == kCurrentThreadHandle) {
+            threadId = context.ThreadId;
+        } else if (const auto* record = LookupHandle(state.r[1]);
+                   record != nullptr && record->Object != nullptr) {
+            threadId = record->Object->ThreadId;
+        }
+        if (!threadId.has_value()) {
+            mSvcEvents.push_back(std::move(event));
+            return {NativeA32HostAction::Wait};
+        }
+        state.r[0] = kResultSuccess;
+        state.r[1] = *threadId;
+        event.Handled = true;
+        mSvcEvents.push_back(std::move(event));
+        return {NativeA32HostAction::Resume};
+    }
     case 0x28:
         event.Name = "GetSystemTick";
         event.Handled = true;
