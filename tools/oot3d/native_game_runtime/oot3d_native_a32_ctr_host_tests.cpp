@@ -851,11 +851,22 @@ void RunAllTests() {
     // Per-title profile (D-019): OoT3D keeps its defaults, MM3D gets the USA region and no OoT3D language modules.
     {
         const auto& oot3d = Oot3dNativeGame::ResolveTitleProfile(0x0004000000033500ULL);
+        Require(!oot3d.MemoryFillInterruptPerUnit,
+                "OoT3D must keep the single-PSC0 MemoryFill interrupt");
         Require(oot3d.SystemRegion == 2 && oot3d.Oot3dLanguageModules,
                 "an unlisted title must keep the OoT3D defaults");
         const auto& mm3d = Oot3dNativeGame::ResolveTitleProfile(0x0004000000125500ULL);
+        Require(mm3d.MemoryFillInterruptPerUnit, "MM3D must get one MemoryFill interrupt per unit");
         Require(mm3d.SystemRegion == 1 && !mm3d.Oot3dLanguageModules,
                 "MM3D must resolve to its own profile");
+        if (std::getenv("TRIAEVUM_FILL_PER_UNIT") == nullptr) {
+            Require(!Oot3dNativeGame::MemoryFillInterruptPerUnit(),
+                    "the default active profile must keep the single-PSC0 MemoryFill interrupt");
+            Oot3dNativeGame::SetActiveTitleProfile(mm3d);
+            Require(Oot3dNativeGame::MemoryFillInterruptPerUnit(),
+                    "the MM3D active profile must raise one MemoryFill interrupt per unit");
+            Oot3dNativeGame::SetActiveTitleProfile(oot3d);
+        }
         const auto directory = std::filesystem::temp_directory_path() / "triaevum_title_profile_test";
         std::filesystem::create_directories(directory);
         {

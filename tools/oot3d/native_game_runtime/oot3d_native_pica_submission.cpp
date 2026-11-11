@@ -1,9 +1,11 @@
+#include "oot3d_native_title_profile.h"
 #include "oot3d_native_pica_submission.h"
 #include "oot3d_cpu_phase_probe.h"
 #include "oot3d_native_capture_clock.h"
 #include "oot3d_native_pica_transfer.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <bit>
 #include <chrono>
 #include <cstring>
@@ -1632,7 +1634,9 @@ bool Oot3dNativePicaSubmissionQueue::SubmitMemoryFill(
     for (const auto& item : translated) {
         const auto& fill = command.Fills[item.Index];
         std::optional<Oot3dPicaInterruptId> interrupt;
-        if (item.Index == 0U && !hasBothBuffers) {
+        if (Oot3dNativeGame::MemoryFillInterruptPerUnit()) {
+            interrupt = item.Index == 0U ? Oot3dPicaInterruptId::Psc0 : Oot3dPicaInterruptId::Psc1;
+        } else if (item.Index == 0U && !hasBothBuffers) {
             interrupt = Oot3dPicaInterruptId::Psc0;
         } else if (item.Index == 1U) {
             interrupt = hasBothBuffers ? Oot3dPicaInterruptId::Psc0

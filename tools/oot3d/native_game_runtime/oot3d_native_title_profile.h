@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -14,11 +15,12 @@ struct TitleProfile {
   const char* Name;
   uint8_t SystemRegion;       // cfg:u GetRegion: 0 JPN, 1 USA, 2 EUR, 3 AUS, 4 CHN, 5 KOR, 6 TWN
   bool Oot3dLanguageModules;  // the RomFS carries OoT3D's menu/message language modules (strict detection)
+  bool MemoryFillInterruptPerUnit;  // MemoryFill raises PSC0 and PSC1, one per fill unit (hardware behaviour)
 };
-inline constexpr TitleProfile kDefaultTitleProfile{0, "OoT3D (default)", 2, true};
+inline constexpr TitleProfile kDefaultTitleProfile{0, "OoT3D (default)", 2, true, false};
 inline constexpr TitleProfile kTitleProfiles[] = {
-    {0x0004000000125500ULL, "MM3D USA v1.0", 1, false},
-    {0x0004000E00125500ULL, "MM3D USA update", 1, false},
+    {0x0004000000125500ULL, "MM3D USA v1.0", 1, false, true},
+    {0x0004000E00125500ULL, "MM3D USA update", 1, false, true},
 };
 
 inline uint64_t ReadProgramId(const std::filesystem::path& codeBinPath) {
@@ -37,6 +39,21 @@ inline const TitleProfile& ResolveTitleProfile(uint64_t programId) {
     if (profile.ProgramId == programId) return profile;
   }
   return kDefaultTitleProfile;
+}
+
+// The profile of the running title: set once at start-up (window setup), read by the GSP / PICA emulation.
+inline const TitleProfile*& ActiveTitleProfileSlot() {
+  static const TitleProfile* active = &kDefaultTitleProfile;
+  return active;
+}
+inline const TitleProfile& ActiveTitleProfile() { return *ActiveTitleProfileSlot(); }
+inline void SetActiveTitleProfile(const TitleProfile& profile) { ActiveTitleProfileSlot() = &profile; }
+
+// MemoryFill interrupt policy (docs/decisiones.md D-021). TRIAEVUM_FILL_PER_UNIT=0/1 overrides the profile (diagnostic).
+inline bool MemoryFillInterruptPerUnit() {
+  static const char* override = std::getenv("TRIAEVUM_FILL_PER_UNIT");
+  if (override != nullptr) return std::atoi(override) != 0;
+  return ActiveTitleProfile().MemoryFillInterruptPerUnit;
 }
 
 } // namespace Oot3dNativeGame

@@ -256,6 +256,7 @@ void NativeA32WindowSession::Setup() {
       std::move(detectedLanguages));
   hostConfig.SystemLanguage = languageSettings->SystemId();
   hostConfig.SystemRegion = titleProfile.SystemRegion;
+  Oot3dNativeGame::SetActiveTitleProfile(titleProfile);
   // Diagnostic (opt-in): TRIAEVUM_SYSTEM_REGION=<n> overrides the region cfg:u reports (0 JPN, 1 USA, 2 EUR ...).
   if (const char* region = std::getenv("TRIAEVUM_SYSTEM_REGION")) {
     hostConfig.SystemRegion = static_cast<uint8_t>(std::atoi(region));

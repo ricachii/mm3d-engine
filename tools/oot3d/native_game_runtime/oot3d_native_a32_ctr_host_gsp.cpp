@@ -1,4 +1,5 @@
 // CTR host services: the gsp::Gpu session.
+#include "oot3d_native_title_profile.h"
 #include "oot3d_native_a32_ctr_host_internal.h"
 
 namespace Oot3dNativeGame {
@@ -310,7 +311,14 @@ NativeA32HostResult NativeA32CtrHostServices::HandleGspRequest(
                             submissionResult.MemoryFillDeferredToGpu) {
                             continue;
                         }
-                        if (fillIndex == 0U && !hasBothBuffers) {
+                        if (MemoryFillInterruptPerUnit()) {
+                            submitted = QueueGspInterrupt(
+                                memory,
+                                static_cast<uint8_t>(
+                                    fillIndex == 0U
+                                        ? Oot3dPicaInterruptId::Psc0
+                                        : Oot3dPicaInterruptId::Psc1));
+                        } else if (fillIndex == 0U && !hasBothBuffers) {
                             submitted = QueueGspInterrupt(
                                 memory,
                                 static_cast<uint8_t>(
