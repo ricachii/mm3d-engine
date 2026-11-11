@@ -3301,7 +3301,11 @@ bool GfxRenderingAPIOGL::SubmitPicaDraw(
             throw std::runtime_error("invalid PICA scissor mode");
         }
         if (draw.FramebufferWidth == 0U || draw.FramebufferHeight == 0U) {
-            throw std::runtime_error("PICA framebuffer has zero extent");
+            // A draw with no render target configured (MM3D's GPU initialisation list triggers one before it
+            // programs the framebuffer registers) draws to nothing; the composition schedule leaves it out too
+            // (oot3d_native_pica_presentation_scheduler.cpp). docs/decisiones.md D-022.
+            GlPerf::PhaseEnd();
+            return true;
         }
         if (mNativePica->Composition.Valid() &&
             !mNativePica->Composition.ConsumeDraw(

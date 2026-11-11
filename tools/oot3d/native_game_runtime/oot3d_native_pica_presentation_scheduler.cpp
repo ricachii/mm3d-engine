@@ -312,6 +312,10 @@ bool Oot3dPicaPresentationScheduler::Execute(
       continue;
     const auto &draw = *sample.Draws[drawIndex].BasePlan;
     const auto &framebuffer = draw.State.Framebuffer;
+    // A draw with no render target configured (MM3D's GPU initialisation list triggers one before it programs
+    // the framebuffer registers) draws to nothing: it has no extent to compose.
+    if (framebuffer.Width == 0U || framebuffer.Height == 0U)
+      continue;
     mCompositionDrawScratch.push_back({
         .SubmissionId = draw.SubmissionId,
         .Target = {
