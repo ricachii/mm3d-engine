@@ -658,6 +658,30 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvc(
                      immediate, state.r[15], state.r[14], static_cast<unsigned>(context.ThreadId),
                      state.r[0], state.r[1], state.r[2], state.r[3]);
     }
+    // Diagnostic (opt-in, with TRIAEVUM_SVC_TRACE): TRIAEVUM_SVC_STACK=1 also prints the words on the guest stack
+    // that look like code addresses (a poor man's call chain for the thread that issued the SVC).
+    static const bool traceStack = std::getenv("TRIAEVUM_SVC_STACK") != nullptr;
+    if (traceSvc && traceStack) {
+        std::fprintf(stderr, "  stack thread=%u sp=%08X:", static_cast<unsigned>(context.ThreadId), state.r[13]);
+        for (uint32_t word = 0; word < 96U; ++word) {
+            uint32_t value = 0;
+            if (!memory.Read32(state.r[13] + word * 4U, &value)) {
+                break;
+            }
+            if (value >= 0x00100000U && value < 0x00700000U && (value & 3U) == 0U) {
+                std::fprintf(stderr, " %08X", value);
+            }
+        }
+        std::fprintf(stderr, "\n");
+    }
+    {
+        // Diagnostic (opt-in, TRIAEVUM_THREAD_DUMP=1): a few snapshots of what every parked thread waits for.
+        static uint64_t svcCount = 0;
+        ++svcCount;
+        if (svcCount == 20000U || svcCount == 40000U || svcCount == 80000U) {
+            DumpGuestWaits("periodic");
+        }
+    }
     auto result = HandleSvcImpl(immediate, state, memory, context);
     if (traceSvc) {
         if (const auto* last = mSvcEvents.LastEvent()) {
@@ -1661,6 +1685,10 @@ void NativeA32CtrHostServices::DumpGuestWaits(const char* reason) const {
                          object ? static_cast<int>(object->AvailableCount) : -1);
         }
         std::fprintf(stderr, "\n");
+    }
+    for (const auto& arbiter : mArbiterWaiters) {
+        std::fprintf(stderr, "  thread=%u arbitrates on address %08X\n",
+                     static_cast<unsigned>(arbiter.ThreadId), arbiter.Address);
     }
     for (const auto& sleeper : mSleepWaiters) {
         std::fprintf(stderr, "  thread=%u sleeps until tick %llu\n", static_cast<unsigned>(sleeper.ThreadId),
