@@ -539,7 +539,7 @@ class NativeA32CtrHostServices final : public NativeA32HostServices {
     // Consecutive SleepThread(0) yields with no other SVC in between (a spin-wait on a flag that only the host
     // can change, e.g. a VBlank). See the 0x0A case of HandleSvcImpl.
     uint32_t mYieldStreak = 0;
-    void DumpGuestWaits(const char* reason) const;
+    void DumpGuestWaits(const char* reason, const NativeA32Process* process = nullptr) const;
     std::vector<ArchiveRecord> mArchives;
     // Save journal on the directory backend (oot3d_native_a32_ctr_save_safety.h):
     // atomic writes, backups and recovery. Once per run; a savestate restore

@@ -700,8 +700,8 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvc(
         // Diagnostic (opt-in, TRIAEVUM_THREAD_DUMP=1): a few snapshots of what every parked thread waits for.
         static uint64_t svcCount = 0;
         ++svcCount;
-        if (svcCount == 20000U || svcCount == 40000U || svcCount == 80000U) {
-            DumpGuestWaits("periodic");
+        if (svcCount == 3000U || svcCount == 6000U || svcCount == 12000U || svcCount == 24000U) {
+            DumpGuestWaits("periodic", &context.Process);
         }
     }
     auto result = HandleSvcImpl(immediate, state, memory, context);
@@ -831,7 +831,7 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvcImpl(
             constexpr uint32_t kYieldSpinLimit = 256U;
             if (++mYieldStreak >= kYieldSpinLimit) {
                 if (mYieldStreak == kYieldSpinLimit) {
-                    DumpGuestWaits("yield-spin");
+                    DumpGuestWaits("yield-spin", &context.Process);
                 }
                 mYieldStreak = 0;
                 nanoseconds = 100000;
@@ -1691,7 +1691,7 @@ bool NativeA32CtrHostServices::HidGyroscopeEnabled() const {
 }
 
 // Diagnostic (opt-in, TRIAEVUM_THREAD_DUMP=1): what every parked guest thread waits for.
-void NativeA32CtrHostServices::DumpGuestWaits(const char* reason) const {
+void NativeA32CtrHostServices::DumpGuestWaits(const char* reason, const NativeA32Process* process) const {
     static const bool enabled = std::getenv("TRIAEVUM_THREAD_DUMP") != nullptr;
     if (!enabled) {
         return;
@@ -1699,6 +1699,16 @@ void NativeA32CtrHostServices::DumpGuestWaits(const char* reason) const {
     std::fprintf(stderr, "THREAD_DUMP reason=%s ticks=%llu waiters=%zu sleepers=%zu\n", reason,
                  static_cast<unsigned long long>(mSystemTicks), mSynchronizationWaiters.size(),
                  mSleepWaiters.size());
+    if (process != nullptr) {
+        static const char* const kStatusNames[] = {"empty", "ready", "running", "waiting", "terminated", "faulted"};
+        for (size_t id = 0; id < process->ThreadCount(); ++id) {
+            const auto status = static_cast<size_t>(process->ThreadStatus(static_cast<uint32_t>(id)));
+            std::fprintf(stderr, "  thread=%zu status=%s prio=%d entry=%08X\n", id,
+                         status < 6U ? kStatusNames[status] : "?",
+                         static_cast<int>(process->ThreadPriority(static_cast<uint32_t>(id)).value_or(0xFFU)),
+                         process->ThreadEntryAddress(static_cast<uint32_t>(id)).value_or(0U));
+        }
+    }
     for (const auto& waiter : mSynchronizationWaiters) {
         std::fprintf(stderr, "  thread=%u waits %s on:", static_cast<unsigned>(waiter.ThreadId),
                      waiter.WaitAll ? "all" : "any");
