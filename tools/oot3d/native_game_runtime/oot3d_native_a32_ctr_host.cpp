@@ -702,6 +702,22 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvc(
         ++svcCount;
         if (svcCount == 3000U || svcCount == 6000U || svcCount == 12000U || svcCount == 24000U) {
             DumpGuestWaits("periodic", &context.Process);
+            // TRIAEVUM_MEM_DUMP=<hex address>:<hex byte count> also prints that guest memory (diagnostic, opt-in).
+            if (const char* spec = std::getenv("TRIAEVUM_MEM_DUMP")) {
+                unsigned long long dumpAddress = 0;
+                unsigned long long dumpBytes = 0;
+                if (std::sscanf(spec, "%llx:%llx", &dumpAddress, &dumpBytes) == 2) {
+                    for (unsigned long long offset = 0; offset < dumpBytes; offset += 16U) {
+                        std::fprintf(stderr, "  MEM %08llX:", dumpAddress + offset);
+                        for (unsigned long long word = 0; word < 4U; ++word) {
+                            uint32_t value = 0;
+                            const bool ok = memory.Read32(static_cast<uint32_t>(dumpAddress + offset + word * 4U), &value);
+                            std::fprintf(stderr, ok ? " %08X" : " --------", value);
+                        }
+                        std::fprintf(stderr, "\n");
+                    }
+                }
+            }
         }
     }
     auto result = HandleSvcImpl(immediate, state, memory, context);
