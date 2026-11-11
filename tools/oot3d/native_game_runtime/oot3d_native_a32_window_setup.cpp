@@ -1,6 +1,7 @@
 // Native A32 window session: setup (process image, host services, renderer, UI, initial state).
 #include "fast/oot3d/gl_widescreen_menu_policy.h"
 #include "oot3d_native_a32_window_session.h"
+#include "oot3d_native_title_profile.h"
 #include "oot3d_gameplay_settings_panel.h"
 #include "oot3d_draw_distance_config.h"
 #include "oot3d_landing_roll.h"
@@ -31,6 +32,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -132,6 +134,7 @@ bool ReadHostAudioSwitch(const char *configName, const char *environmentName) {
   return value != nullptr && std::string_view(value) == "1";
 #endif
 }
+
 
 } // namespace
 
@@ -236,24 +239,27 @@ void NativeA32WindowSession::Setup() {
     picaFrontend.SetPassSpanFallback(
         !std::filesystem::exists(configDirectory / "no_pass_span_fallback", ignored));
   }
-  // Another title (MM3D) has none of OoT3D's menu/message files: degrade to English instead of
-  // aborting (docs/decisiones.md D-016). Any other language-detection error still propagates.
+  const Oot3dNativeGame::TitleProfile& titleProfile =
+      Oot3dNativeGame::ResolveTitleProfile(Oot3dNativeGame::ReadProgramId(manifest->CodeBinPath));
+  std::fprintf(stderr, "title profile: %s (region %u)\n", titleProfile.Name,
+               static_cast<unsigned>(titleProfile.SystemRegion));
   std::vector<Oot3dNativeGame::GameLanguage> detectedLanguages;
-  try {
+  if (titleProfile.Oot3dLanguageModules) {
     detectedLanguages = Oot3dNativeGame::DetectGameLanguages(manifest->RomFsImagePath,
         manifest->RomFsImageOffset, manifest->RomFsImageSize);
-  } catch (const std::runtime_error& error) {
-    if (std::string_view(error.what()).find("No complete OOT3D menu/message language") ==
-        std::string_view::npos) {
-      throw;
-    }
-    std::fprintf(stderr, "game language: %s; using English\n", error.what());
+  } else {
+    // Another title (MM3D) has none of OoT3D's menu/message files: English, no detection.
     detectedLanguages = {{"en", "English", 1}};
   }
   languageSettings = std::make_shared<Oot3dNativeGame::GameLanguageSettings>(
       std::filesystem::path(launch.Host.ConfigurationPath).parent_path() / "game_language.json",
       std::move(detectedLanguages));
   hostConfig.SystemLanguage = languageSettings->SystemId();
+  hostConfig.SystemRegion = titleProfile.SystemRegion;
+  // Diagnostic (opt-in): TRIAEVUM_SYSTEM_REGION=<n> overrides the region cfg:u reports (0 JPN, 1 USA, 2 EUR ...).
+  if (const char* region = std::getenv("TRIAEVUM_SYSTEM_REGION")) {
+    hostConfig.SystemRegion = static_cast<uint8_t>(std::atoi(region));
+  }
   hostConfig.ResourceLimitValues = manifest->ResourceLimitValues;
   hostConfig.ResourceCurrentValues = manifest->ResourceCurrentValues;
   hostConfig.LinearHeapBaseAddress = manifest->LinearHeapBaseAddress;

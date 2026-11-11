@@ -1,4 +1,5 @@
 #include "oot3d_native_a32_ctr_host.h"
+#include "oot3d_native_title_profile.h"
 #include "oot3d_native_a32_dsp_hle.h"
 #include "oot3d_native_pica_frontend.h"
 
@@ -846,6 +847,30 @@ void RunAllTests() {
     Require(host.HandleSvc(0x0A, state, memory, context).Action == NativeA32HostAction::Wait &&
                 host.NextSleepWakeTick().has_value(),
             "a SleepThread(0) spin must become a timed sleep");
+
+    // Per-title profile (D-019): OoT3D keeps its defaults, MM3D gets the USA region and no OoT3D language modules.
+    {
+        const auto& oot3d = Oot3dNativeGame::ResolveTitleProfile(0x0004000000033500ULL);
+        Require(oot3d.SystemRegion == 2 && oot3d.Oot3dLanguageModules,
+                "an unlisted title must keep the OoT3D defaults");
+        const auto& mm3d = Oot3dNativeGame::ResolveTitleProfile(0x0004000000125500ULL);
+        Require(mm3d.SystemRegion == 1 && !mm3d.Oot3dLanguageModules,
+                "MM3D must resolve to its own profile");
+        const auto directory = std::filesystem::temp_directory_path() / "triaevum_title_profile_test";
+        std::filesystem::create_directories(directory);
+        {
+            std::ofstream exheader(directory / "exheader.bin", std::ios::binary);
+            std::string bytes(0x200, '\0');
+            const uint8_t id[8] = {0x00, 0x55, 0x12, 0x00, 0x00, 0x00, 0x04, 0x00};
+            bytes.append(reinterpret_cast<const char*>(id), sizeof(id));
+            exheader.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        }
+        Require(Oot3dNativeGame::ReadProgramId(directory / "code.bin") == 0x0004000000125500ULL,
+                "ReadProgramId did not read the program id at 0x200");
+        Require(Oot3dNativeGame::ReadProgramId(directory / "missing" / "code.bin") == 0,
+                "ReadProgramId must return 0 without an exheader");
+        std::filesystem::remove_all(directory);
+    }
 
     // GetThreadId (svc 0x37): the current-thread pseudo handle.
     state.r[1] = 0xFFFF8000;
