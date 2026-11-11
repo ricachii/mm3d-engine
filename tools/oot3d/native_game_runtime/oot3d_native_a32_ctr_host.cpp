@@ -432,6 +432,12 @@ bool NativeA32CtrHostServices::QueueGspInterrupt(NativeA32Memory& memory,
         !mGspInterruptEvent) {
         return false;
     }
+    // Diagnostic (opt-in, with TRIAEVUM_SVC_TRACE): every interrupt entering the GSP relay queue.
+    static const bool traceGsp = std::getenv("TRIAEVUM_SVC_TRACE") != nullptr;
+    if (traceGsp && interruptId != static_cast<uint8_t>(Oot3dPicaInterruptId::Pdc0) &&
+        interruptId != static_cast<uint8_t>(Oot3dPicaInterruptId::Pdc1)) {
+        std::fprintf(stderr, "GSP_INTERRUPT id=%u\n", static_cast<unsigned>(interruptId));
+    }
     const uint32_t relay =
         *mGspSharedMemory->MappedAddress + mGspThreadId * 0x40U;
     uint8_t index = 0;
@@ -494,6 +500,10 @@ bool NativeA32CtrHostServices::SetGspFramebuffer(
                                                 &error)) {
             return false;
         }
+    }
+    if (std::getenv("TRIAEVUM_SVC_TRACE") != nullptr) {
+        std::fprintf(stderr, "GSP_FRAMEBUFFER screen=%u active=%u left=%08X right=%08X stride=%u format=%u shown=%u\n",
+                     screenId, activeBuffer, addressLeft, addressRight, stride, format, shownBuffer);
     }
     auto& screen = mGspScreens[screenId];
     screen.Slots[activeBuffer] = {addressLeft, addressRight, stride, format,
@@ -657,6 +667,18 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvc(
         std::fprintf(stderr, "SVC 0x%02X pc=%08X lr=%08X thread=%u r0=%08X r1=%08X r2=%08X r3=%08X\n",
                      immediate, state.r[15], state.r[14], static_cast<unsigned>(context.ThreadId),
                      state.r[0], state.r[1], state.r[2], state.r[3]);
+    }
+    if (traceSvc && immediate == 0x08U) {
+        // CreateThread: the entry is the runtime's trampoline; the real function is in the argument block.
+        std::fprintf(stderr, "  create_thread arg block at %08X:", state.r[2]);
+        for (uint32_t word = 0; word < 8U; ++word) {
+            uint32_t value = 0;
+            if (!memory.Read32(state.r[2] + word * 4U, &value)) {
+                break;
+            }
+            std::fprintf(stderr, " %08X", value);
+        }
+        std::fprintf(stderr, "\n");
     }
     // Diagnostic (opt-in, with TRIAEVUM_SVC_TRACE): TRIAEVUM_SVC_STACK=1 also prints the words on the guest stack
     // that look like code addresses (a poor man's call chain for the thread that issued the SVC).

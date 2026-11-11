@@ -257,6 +257,12 @@ NativeA32HostResult NativeA32CtrHostServices::HandleGspRequest(
                     }
                 }
 #endif
+                if (std::getenv("TRIAEVUM_SVC_TRACE") != nullptr) {
+                    std::fprintf(stderr, "GSP_COMMAND id=%u params=%08X %08X %08X %08X %08X %08X %08X\n",
+                                 static_cast<unsigned>(packet.Control & 0xFFU), packet.Parameters[0],
+                                 packet.Parameters[1], packet.Parameters[2], packet.Parameters[3],
+                                 packet.Parameters[4], packet.Parameters[5], packet.Parameters[6]);
+                }
                 if (submitted) {
                     CpuPhaseProbe::Scope cpuFrontend(CpuPhaseProbe::Phase::PicaFrontend);
                     const auto submitStart =
