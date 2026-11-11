@@ -833,6 +833,20 @@ void RunAllTests() {
                 state.r[0] == 0 && state.r[3] == 0 && state.r[4] == 0,
             "QueryMemory did not report an unmapped address as free");
 
+    // SleepThread(0) yields: a short streak resumes at once, a long spin turns into a timed sleep so the host
+    // regains control (a spin-wait on a VBlank would otherwise never end).
+    for (uint32_t yieldIndex = 0; yieldIndex < 255U; ++yieldIndex) {
+        state.r[0] = 0;
+        state.r[1] = 0;
+        Require(host.HandleSvc(0x0A, state, memory, context).Action == NativeA32HostAction::Resume,
+                "a short SleepThread(0) streak must resume at once");
+    }
+    state.r[0] = 0;
+    state.r[1] = 0;
+    Require(host.HandleSvc(0x0A, state, memory, context).Action == NativeA32HostAction::Wait &&
+                host.NextSleepWakeTick().has_value(),
+            "a SleepThread(0) spin must become a timed sleep");
+
     // GetThreadId (svc 0x37): the current-thread pseudo handle.
     state.r[1] = 0xFFFF8000;
     Require(host.HandleSvc(0x37, state, memory, context).Action == NativeA32HostAction::Resume &&

@@ -690,6 +690,9 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvcImpl(
     event.Immediate = immediate;
     event.Pc = state.r[15];
     event.ThreadId = context.ThreadId;
+    if (immediate != 0x0AU) {
+        mYieldStreak = 0;
+    }
     switch (immediate) {
     case 0x01:
         return HandleControlMemory(state, memory, std::move(event));
@@ -772,7 +775,22 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvcImpl(
         const uint64_t rawNanoseconds =
             static_cast<uint64_t>(state.r[0]) |
             (static_cast<uint64_t>(state.r[1]) << 32U);
-        const int64_t nanoseconds = static_cast<int64_t>(rawNanoseconds);
+        int64_t nanoseconds = static_cast<int64_t>(rawNanoseconds);
+        // A thread that yields (SleepThread(0)) over and over with nothing else happening is polling a value
+        // that only changes when the host runs the next VBlank/timer. A yield returns at once and costs no guest
+        // time, so RunUntilGuestWait would never come back to the host and the clock would never reach the next
+        // VBlank (MM3D hangs there right after configuring gsp::Gpu). Hardware spends time on every yield: after
+        // a streak, turn it into a 100 us sleep, which parks the thread and lets the frame loop advance the clock.
+        if (nanoseconds == 0) {
+            constexpr uint32_t kYieldSpinLimit = 256U;
+            if (++mYieldStreak >= kYieldSpinLimit) {
+                if (mYieldStreak == kYieldSpinLimit) {
+                    DumpGuestWaits("yield-spin");
+                }
+                mYieldStreak = 0;
+                nanoseconds = 100000;
+            }
+        }
         // config/kernel_svc: the event keeps its numbers (name written when
         // read, NativeA32CtrSvcEventName).
         const bool numbersOnly = mConfig.FastSvc;
@@ -1624,6 +1642,30 @@ bool NativeA32CtrHostServices::HidAccelerometerEnabled() const {
 
 bool NativeA32CtrHostServices::HidGyroscopeEnabled() const {
     return mHidGyroscopeEnableCount != 0U;
+}
+
+// Diagnostic (opt-in, TRIAEVUM_THREAD_DUMP=1): what every parked guest thread waits for.
+void NativeA32CtrHostServices::DumpGuestWaits(const char* reason) const {
+    static const bool enabled = std::getenv("TRIAEVUM_THREAD_DUMP") != nullptr;
+    if (!enabled) {
+        return;
+    }
+    std::fprintf(stderr, "THREAD_DUMP reason=%s ticks=%llu waiters=%zu sleepers=%zu\n", reason,
+                 static_cast<unsigned long long>(mSystemTicks), mSynchronizationWaiters.size(),
+                 mSleepWaiters.size());
+    for (const auto& waiter : mSynchronizationWaiters) {
+        std::fprintf(stderr, "  thread=%u waits %s on:", static_cast<unsigned>(waiter.ThreadId),
+                     waiter.WaitAll ? "all" : "any");
+        for (const auto& object : waiter.Objects) {
+            std::fprintf(stderr, " %s(avail=%d)", object ? object->Type.c_str() : "null",
+                         object ? static_cast<int>(object->AvailableCount) : -1);
+        }
+        std::fprintf(stderr, "\n");
+    }
+    for (const auto& sleeper : mSleepWaiters) {
+        std::fprintf(stderr, "  thread=%u sleeps until tick %llu\n", static_cast<unsigned>(sleeper.ThreadId),
+                     static_cast<unsigned long long>(sleeper.WakeTick));
+    }
 }
 
 bool NativeA32CtrHostServices::NdmSchedulerSuspended() const {
