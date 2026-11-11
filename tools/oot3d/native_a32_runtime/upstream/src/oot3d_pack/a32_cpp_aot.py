@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import hashlib
 import json
 import re
@@ -151,6 +152,17 @@ def _generator_fingerprint() -> tuple[
         digest.update(b"\0")
         digest.update(version.encode("utf-8"))
     return digest.hexdigest(), sources, dependencies
+
+
+# Opt-in, off by default so existing (OoT3D) programs do not change: see the call handling in the flow walker.
+SKIP_WORD_CALLS = os.environ.get("OOT3D_SKIP_WORD_CALLS") == "1"
+
+
+def _is_skip_word_helper(decoder: "_Decoder", slots: set[int], target: int) -> bool:
+    """True if the code at `target` starts with LDR Rd, [LR], #4 (post-indexed, add, always)."""
+    if target not in slots:
+        return False
+    return (decoder.get(target).raw & 0xFFFF0FFF) == 0xE49E0004
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -359,6 +371,11 @@ def _walk_cfg(
                 # audited internal destinations that are not standalone roots.
                 control_targets.add(item.target)
                 enqueue(item.target, block_start=True)
+                # Opt-in (OOT3D_SKIP_WORD_CALLS=1, set by tools/mm3d/prepare_title.py): a helper that starts with
+                # `ldr rX, [lr], #4` consumes the inline word after the call and returns past it, so the code
+                # after the call resumes at pc + 8. The word itself is data and is still visited as before.
+                if SKIP_WORD_CALLS and _is_skip_word_helper(decoder, slots, item.target):
+                    enqueue(pc + 8, block_start=True)
             enqueue(fallthrough, block_start=True)
             continue
         if item.kind == "indirect_branch":

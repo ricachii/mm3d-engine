@@ -20,6 +20,7 @@ import argparse
 import collections
 import csv
 import json
+import os
 import struct
 import subprocess
 import sys
@@ -51,6 +52,34 @@ def step_inventory(args, work: Path):
 def thumb_only(modes: bytes, base: int, address: int) -> bool:
     index = (address - base) // 2
     return 0 <= index < len(modes) and modes[index] == 2
+
+
+def skip_word_call_sites(code: bytes, base: int) -> list[int]:
+    """Sitios de `bl` (condicion siempre) a un ayudante cuya primera instruccion es `ldr rX, [lr], #4`.
+
+    Ese ayudante lee la palabra en linea que sigue al `bl` y devuelve a `site + 8`: la palabra es un dato (en MM3D,
+    los comodines de excepcion de coma flotante de la libreria matematica), no una instruccion. whole_aot_program.py
+    supone que la llamada vuelve a `site + 4`, decodifica el dato como instruccion y, si no decodifica, deja la
+    funcion abierta (`0x1DAFC0` y `0x61CBF4`). Con OOT3D_SKIP_WORD_CALLS=1 el flujo siembra `site + 8` como bloque
+    (ver a32_cpp_aot.py) y `repair_program` cierra la funcion.
+    """
+    sites = []
+    count = len(code) // 4
+    for index in range(count):
+        raw = struct.unpack_from("<I", code, index * 4)[0]
+        if (raw & 0xFF000000) != 0xEB000000:
+            continue
+        offset = raw & 0x00FFFFFF
+        if offset & 0x00800000:
+            offset -= 0x01000000
+        target = base + index * 4 + 8 + offset * 4
+        slot = (target - base) // 4
+        if target % 4 or not 0 <= slot < count:
+            continue
+        # LDR Rd, [LR], #4  (post-indexado, suma, sin escritura en PC): 0xE49E?004
+        if (struct.unpack_from("<I", code, slot * 4)[0] & 0xFFFF0FFF) == 0xE49E0004:
+            sites.append(base + index * 4)
+    return sites
 
 
 def step_synthetic_inventory(args, work: Path, rows, modes, code_len: int):
@@ -95,7 +124,7 @@ def step_program(args, work: Path, inventory: Path, executable_size: int) -> dic
             [sys.executable, str(A32 / "whole_aot_program.py"), "--code", args.code, "--inventory", str(inventory),
              "--boundary-audit", str(work / "audit_empty.csv"), "--base", hex(args.base),
              "--executable-size", hex(executable_size), "--output", str(program), "--force"],
-            check=True)
+            check=True, env={**os.environ, "OOT3D_SKIP_WORD_CALLS": "1"})
     return json.loads(program.read_text())
 
 
@@ -112,10 +141,24 @@ def repair_program(program: dict, code: bytes, base: int) -> int:
     resume (identico a un BLX ya cerrado). Si TODAS las aristas sin resolver son de ese tipo, la funcion se marca cerrada.
     """
     repaired = 0
+    skip_resumes = {site + 4 for site in skip_word_call_sites(code, base)}
+    block_pcs = {int(block["pc"]) for block in program.get("blocks", [])}
     for function in program["functions"]:
         if function.get("closed_static_cfg"):
             continue
         edges = function.get("unresolved_static_edges", [])
+        # Dato en linea tras un `bl` salta-palabra: la arista "desconocida" es el dato, y el codigo que le sigue
+        # (site + 4) ya es un bloque sembrado. Solo se cierra si TODAS las aristas abiertas son de ese tipo.
+        if edges and all(
+            edge.get("kind") == "unknown" and edge.get("site") is not None
+            and int(edge["site"]) in skip_resumes and int(edge["site"]) + 4 in block_pcs
+            for edge in edges
+        ):
+            function["closed_static_cfg"] = True
+            function["unresolved_static_edges"] = []
+            function["repaired"] = "inline-data-after-skip-word-call"
+            repaired += 1
+            continue
         calls = {(int(c["site"]), int(c["target"])) for c in function.get("direct_calls", [])}
         if not edges:
             continue
