@@ -35,6 +35,11 @@ SYNTH_BASE = int(__import__("os").environ.get("MM3D_SYNTH_BASE", "0x00800000"), 
 AL = 0xE
 
 
+# End of the .text the Thumb discovery may follow: the page-aligned-down text size of the
+# ExHeader (0x51C000 for mm3d-pc's USA v1.1; main() sets it for other builds).
+TEXT_LIMIT = BASE + 0x51C000
+
+
 class ConversionError(ValueError):
     pass
 
@@ -323,14 +328,25 @@ def discover_thumb_function(code: bytes, entry: int, known: set[int]) -> tuple[s
     seen: set[int] = set()
     calls: set[int] = set()
     work = [entry]
+    call_end = None
     while work:
         pc = work.pop()
         while pc not in seen and pc not in known:
-            if not BASE <= pc < BASE + 0x51C000:   # .text only
+            if not BASE <= pc < TEXT_LIMIT:   # .text only
                 raise ConversionError(f"Thumb flow leaves .text at 0x{pc:08X}")
             h = struct.unpack_from("<H", code, pc - BASE)[0]
             h2 = struct.unpack_from("<H", code, pc + 2 - BASE)[0]
-            size, items = convert_insn(code, pc, h, h2)
+            try:
+                size, items = convert_insn(code, pc, h, h2)
+            except ConversionError:
+                if call_end is not None and call_end <= pc <= call_end + 6:
+                    # What follows a call is not Thumb code (an ARM function, a pool): the
+                    # callee never returns (abort/throw helper). The few halfwords decoded
+                    # after the call by accident are dropped and the path ends here.
+                    for stray in range(call_end, pc + 2, 2):
+                        seen.discard(stray)
+                    break
+                raise
             seen.add(pc)
             if size == 4:
                 seen.add(pc + 2)
@@ -339,6 +355,7 @@ def discover_thumb_function(code: bytes, entry: int, known: set[int]) -> tuple[s
                 if isinstance(item, tuple) and item[0] == "branch":
                     _, cond, link, target, to_thumb = item
                     if link:
+                        call_end = pc + size
                         if to_thumb:
                             calls.add(target)
                     elif cond == AL:
@@ -487,6 +504,8 @@ def main() -> int:
     code = bytearray(args.code.read_bytes())
     exh = args.exheader.read_bytes()
     text_size = struct.unpack_from("<I", exh, 0x18)[0]
+    global TEXT_LIMIT
+    TEXT_LIMIT = BASE + (text_size & ~0xFFF)
     thumb = json.loads(args.thumb_inventory.read_text())["thumb_functions"]
     program = json.loads(args.call_sites.read_text())
     call_sites = {(int(c["site"]), int(c["target"])) for f in program["functions"]
