@@ -117,6 +117,17 @@ void ApplyNativeWidescreenProjectionPolicy(
       pc != Oot3dNativeGame::kTopScreenSystemPageBoundary) {
     runtime.PicaCompositionTracker->ObserveBlockEntry(pc, state, memory);
   }
+  if (runtime.CallTrace) {
+    // thread = (thread_pointer - 0x1FF82000) / 0x200; one line per first visit.
+    const uint64_t key = (static_cast<uint64_t>(state.thread_pointer) << 32) | pc;
+    if (runtime.CallTraceSeen.insert(key).second) {
+      std::fprintf(runtime.CallTraceFile, "%llu t%u pc=%08X lr=%08X sp=%08X r0=%08X r1=%08X\n",
+                   static_cast<unsigned long long>(runtime.CallTraceSequence++),
+                   (state.thread_pointer - 0x1FF82000U) / 0x200U, pc,
+                   state.r[14], state.r[13], state.r[0], state.r[1]);
+      std::fflush(runtime.CallTraceFile);
+    }
+  }
   if (runtime.TraceA32Blocks) {
     ++runtime.BlockTraceRecordsObserved;
     if (runtime.BlockTrace.size() == kMaximumA32BlockTraceRecords) {

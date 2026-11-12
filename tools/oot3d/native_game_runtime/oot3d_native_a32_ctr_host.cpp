@@ -438,6 +438,13 @@ bool NativeA32CtrHostServices::QueueGspInterrupt(NativeA32Memory& memory,
         interruptId != static_cast<uint8_t>(Oot3dPicaInterruptId::Pdc1)) {
         std::fprintf(stderr, "GSP_INTERRUPT id=%u\n", static_cast<unsigned>(interruptId));
     }
+    static const bool deferCompletions = std::getenv("TRIAEVUM_GSP_DEFER") != nullptr;
+    if (deferCompletions && !mFlushingDeferredGsp &&
+        interruptId != static_cast<uint8_t>(Oot3dPicaInterruptId::Pdc0) &&
+        interruptId != static_cast<uint8_t>(Oot3dPicaInterruptId::Pdc1)) {
+        mDeferredGspInterrupts.push_back(interruptId);
+        return true;
+    }
     const uint32_t relay =
         *mGspSharedMemory->MappedAddress + mGspThreadId * 0x40U;
     uint8_t index = 0;
@@ -1735,8 +1742,17 @@ void NativeA32CtrHostServices::DumpGuestWaits(const char* reason, const NativeA3
         std::fprintf(stderr, "\n");
     }
     for (const auto& arbiter : mArbiterWaiters) {
-        std::fprintf(stderr, "  thread=%u arbitrates on address %08X\n",
+        std::fprintf(stderr, "  thread=%u arbitrates on address %08X",
                      static_cast<unsigned>(arbiter.ThreadId), arbiter.Address);
+        if (process != nullptr) {
+            for (int word = -1; word <= 2; ++word) {
+                uint32_t value = 0;
+                const bool ok = const_cast<NativeA32Process*>(process)->Memory().Read32(
+                    arbiter.Address + static_cast<uint32_t>(word * 4), &value);
+                std::fprintf(stderr, ok ? " [%+d]=%08X" : " [%+d]=--------", word * 4, value);
+            }
+        }
+        std::fprintf(stderr, "%c", 10);
     }
     for (const auto& sleeper : mSleepWaiters) {
         std::fprintf(stderr, "  thread=%u sleeps until tick %llu\n", static_cast<unsigned>(sleeper.ThreadId),
@@ -1773,6 +1789,15 @@ bool NativeA32CtrHostServices::SignalDspInterrupt(uint32_t type,
 }
 
 bool NativeA32CtrHostServices::SignalVBlank(NativeA32Memory& memory) {
+    if (!mDeferredGspInterrupts.empty()) {
+        mFlushingDeferredGsp = true;
+        const auto pending = std::move(mDeferredGspInterrupts);
+        mDeferredGspInterrupts.clear();
+        for (const uint8_t id : pending) {
+            QueueGspInterrupt(memory, id);
+        }
+        mFlushingDeferredGsp = false;
+    }
     return SignalPicaInterrupt(memory, Oot3dPicaInterruptId::Pdc0) &&
            SignalPicaInterrupt(memory, Oot3dPicaInterruptId::Pdc1);
 }

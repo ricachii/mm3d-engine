@@ -3,6 +3,8 @@
 // Shared declarations of the A32 window host (oot3d_native_a32_window.cpp) and its topic files:
 // title addresses, the dispatch and projection state, and the functions the window calls.
 
+#include <cstdio>
+#include <unordered_set>
 #include "oot3d_native_a32_window.h"
 #include "oot3d_dev_free_camera.h"
 #include "three_ds_sdl_controller.h"
@@ -381,6 +383,11 @@ struct NativeWidescreenProjectionState {
   uint32_t BlockSampleState = 0x6D2B79F5U;
   std::unordered_map<uint32_t, uint64_t> BlockSamples;
   bool TraceA32Blocks = false;
+  // TRIAEVUM_CALL_TRACE=<file>: first visit of every block per guest thread.
+  bool CallTrace = false;
+  std::FILE *CallTraceFile = nullptr;
+  uint64_t CallTraceSequence = 0;
+  std::unordered_set<uint64_t> CallTraceSeen;
   bool BlockTraceTruncated = false;
   uint64_t BlockTraceRecordsObserved = 0;
   Oot3dNativeGame::NativeA32Memory *TraceMemory = nullptr;

@@ -350,6 +350,11 @@ void NativeA32WindowSession::Setup() {
   widescreenProjection.CollectExtendedDiagnostics = launch.ExtendedDiagnostics;
   widescreenProjection.ProfileA32Blocks = launch.ProfileA32Blocks;
   widescreenProjection.TraceA32Blocks = !launch.A32BlockTracePath.empty();
+  if (const char *callTracePath = std::getenv("TRIAEVUM_CALL_TRACE");
+      callTracePath != nullptr && *callTracePath != 0) {
+    widescreenProjection.CallTraceFile = std::fopen(callTracePath, "w");
+    widescreenProjection.CallTrace = widescreenProjection.CallTraceFile != nullptr;
+  }
   {
     // Per-function profile of the guest code and switch for the native overrides.
     // Both only read config files; without them nothing changes.
@@ -725,7 +730,8 @@ void NativeA32WindowSession::Setup() {
       launch.UiProfile == Oot3dNativeGame::Oot3dUiProfile::TopScreen;
   widescreenProjection.TopScreenConfig = activeTopScreenConfig;
   const bool blockEntryForAll =
-      launch.ProfileA32Blocks || widescreenProjection.TraceA32Blocks;
+      launch.ProfileA32Blocks || widescreenProjection.TraceA32Blocks ||
+      widescreenProjection.CallTrace;
   if (guestProfiler.Active()) {
     // The profile sees every block and forwards to the policy only its hooks.
     guestProfiler.Chain(&ApplyNativeWidescreenProjectionPolicy,
@@ -1338,7 +1344,8 @@ void NativeA32WindowSession::Setup() {
   } else {
     process.SetBlockEntryCallback(
         &ApplyNativeWidescreenProjectionPolicy, &widescreenProjection,
-        launch.ProfileA32Blocks || widescreenProjection.TraceA32Blocks
+        launch.ProfileA32Blocks || widescreenProjection.TraceA32Blocks ||
+      widescreenProjection.CallTrace
             ? std::vector<uint32_t>{}
             : blockEntryHooks);
   }

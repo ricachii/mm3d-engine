@@ -1540,7 +1540,8 @@ bool NativeA32WindowSession::RunFrame() {
     if (sample != guestProfilerInstalled && processStorage) {
       guestProfilerInstalled = sample;
       const bool forAll =
-          launch.ProfileA32Blocks || widescreenProjection.TraceA32Blocks;
+          launch.ProfileA32Blocks || widescreenProjection.TraceA32Blocks ||
+          widescreenProjection.CallTrace;
       if (sample) {
         processStorage->SetBlockEntryCallback(
             &Oot3dNativeGame::GuestBlockProfiler::OnBlockEntry, &guestProfiler,
