@@ -431,7 +431,9 @@ bool NativeA32CtrHostServices::QueueGspInterrupt(NativeA32Memory& memory,
                                                  uint8_t interruptId) {
     if (!mGspSharedMemory || !mGspSharedMemory->MappedAddress.has_value() ||
         !mGspInterruptEvent) {
-        return false;
+        // Nobody registered an interrupt relay queue yet: like the hardware, the interrupt is simply
+        // not delivered (it is not an error; mm3d-pc does the same).
+        return true;
     }
     // Diagnostic (opt-in, with TRIAEVUM_SVC_TRACE): every interrupt entering the GSP relay queue.
     static const bool traceGsp = std::getenv("TRIAEVUM_SVC_TRACE") != nullptr;

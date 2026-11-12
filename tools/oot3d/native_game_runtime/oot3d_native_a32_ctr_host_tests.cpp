@@ -2209,6 +2209,10 @@ void RunAllTests() {
                 response == 0x00160040,
             "GSP:AcquireRight response is wrong");
 
+    // Before the guest registers its relay queue an interrupt is silently dropped, not an error.
+    Require(host.SignalVBlank(memory),
+            "a VBlank before the GSP relay queue exists must not fail");
+
     state.r[1] = 0;
     Require(host.HandleSvc(0x17, state, memory, context).Action ==
                 NativeA32HostAction::Resume,
