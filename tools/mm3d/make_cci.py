@@ -124,13 +124,21 @@ def main() -> int:
 
         ncch_units = cursor
         first = 0x20                                                     # NCCH at 0x4000, as in retail dumps
+        # Partition 7 keeps the update's own NCCH (its RomFS is the "update RomFS" the game opens with
+        # fs:USER OpenFileDirectly file path type 5). It starts on a 0x80-unit boundary after partition 0.
+        update_start = align(first + ncch_units, 0x80)
+        with open(update.path, "rb") as source:
+            source.seek(update.offset)
+            update_ncch = source.read(struct.unpack_from("<I", update.header, 0x104)[0] * UNIT)
         ncsd = bytearray(first * UNIT)
         ncsd[0x100:0x104] = b"NCSD"
-        struct.pack_into("<I", ncsd, 0x104, first + ncch_units)
+        struct.pack_into("<I", ncsd, 0x104, update_start + len(update_ncch) // UNIT)
         ncsd[0x108:0x110] = header[0x108:0x110]                          # media id = title id
         ncsd[0x110] = 1                                                  # partition 0: executable content
         ncsd[0x118] = 3                                                  # (no encryption of the container)
         struct.pack_into("<II", ncsd, 0x120, first, ncch_units)
+        struct.pack_into("<II", ncsd, 0x120 + 7 * 8, update_start, len(update_ncch) // UNIT)
+        ncsd[0x110 + 7] = 1
         ncsd[0x188 + 5] = 2                                              # media type: card1
         ncsd[0x188 + 6] = 0                                              # media unit 0x200
         with open(out, "wb") as target:
@@ -141,6 +149,8 @@ def main() -> int:
                 target.write(blob)
             target.write(b"\0" * ((layout[0x1B0][0] - layout[0x1A0][0] - layout[0x1A0][1]) * UNIT))
             target.write(romfs)
+            target.write(bytes((update_start - first - ncch_units) * UNIT))
+            target.write(update_ncch)
     print(f"wrote {out} ({out.stat().st_size} bytes)")
     return 0
 

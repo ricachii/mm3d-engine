@@ -255,9 +255,33 @@ def extract(rom: Path, game: Path) -> None:
         fail(f"{rom.name} is not a .3ds/.cci (NCSD) image. CIA files are not supported yet.")
     game.mkdir(parents=True, exist_ok=True)
     ctr_extract.main(str(rom), str(game))
+    extract_update_romfs(rom, game)
     if not (game / "code.bin").is_file():
         fail("The ROM is encrypted. Use a decrypted dump (for example GodMode9's "
              "'decrypted' option or a decryption tool) and run Setup again.")
+
+
+def extract_update_romfs(rom: Path, game: Path) -> None:
+    """Partition 7 of the .cci made by tools/mm3d/make_cci.py holds the update's NCCH: its RomFS becomes
+    game/update_romfs.bin (the "update RomFS" that the eShop 1.1.0 code opens, file path type 5)."""
+    import struct
+    target = game / "update_romfs.bin"
+    target.unlink(missing_ok=True)
+    with open(rom, "rb") as source:
+        header = source.read(0x200)
+        start, units = struct.unpack_from("<II", header, 0x120 + 7 * 8)
+        if not units:
+            return
+        source.seek(start * 0x200)
+        ncch = source.read(0x200)
+        if ncch[0x100:0x104] != b"NCCH":
+            return
+        offset, size = struct.unpack_from("<II", ncch, 0x1B0)
+        if not size:
+            return
+        source.seek(start * 0x200 + offset * 0x200)
+        target.write_bytes(source.read(size * 0x200))
+    print(f"  update RomFS: {target.stat().st_size} bytes")
 
 
 def prepare_work(work: Path, recipe: Path) -> None:
@@ -403,6 +427,19 @@ def main() -> int:
          "--romfs-image", game / "romfs.bin", "--output", manifest])
     data = json.loads(manifest.read_text())
     data["title"] = dict(TITLE, **({"variant": build["variant"]} if build["variant"] else {}))
+    update_romfs = game / "update_romfs.bin"
+    if build["variant"] == "eshop110":
+        if not update_romfs.is_file():
+            fail("The eShop 1.1.0 build needs the update's RomFS (partition 7 of the .cci made by "
+                 "tools/mm3d/make_cci.py from the base and update CIAs); this ROM does not carry it.")
+        sys.path.insert(0, str(REPO / "tools/oot3d/native_a32_runtime"))
+        import build_process_manifest as bpm
+        size = update_romfs.stat().st_size
+        offset, service = bpm.romfs_service_window(update_romfs, size)
+        data["source"].update({"update_romfs_image_path": str(update_romfs.resolve()),
+                               "update_romfs_image_file_size": size,
+                               "update_romfs_service_offset": offset,
+                               "update_romfs_service_size": service})
 
     def relative(value):
         # Paths relative to the folder (Play starts there), so it can be moved.

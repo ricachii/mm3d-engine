@@ -59,6 +59,8 @@ struct NativeA32ProcessImageManifest {
     // Optional, from source.update_romfs_image_path (+ _file_size): the update's RomFS image.
     std::filesystem::path UpdateRomFsImagePath;
     uint64_t UpdateRomFsImageFileSize = 0;
+    uint64_t UpdateRomFsImageOffset = 0;  // the Level-3 window the game reads (update_romfs_service_*)
+    uint64_t UpdateRomFsImageSize = 0;
     std::string ProcessName;
     uint32_t EntryAddress = 0;
     uint32_t PageSize = 0;

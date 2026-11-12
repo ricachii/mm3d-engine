@@ -3682,7 +3682,8 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
   hostConfig.RomFsImageOffset = manifest->RomFsImageOffset;
   hostConfig.RomFsImageSize = manifest->RomFsImageSize;
   hostConfig.UpdateRomFsImagePath = manifest->UpdateRomFsImagePath;
-  hostConfig.UpdateRomFsImageSize = manifest->UpdateRomFsImageFileSize;
+  hostConfig.UpdateRomFsImageOffset = manifest->UpdateRomFsImageOffset;
+  hostConfig.UpdateRomFsImageSize = manifest->UpdateRomFsImageSize;
   hostConfig.PicaFrontend = &picaFrontend;
   hostConfig.PicaCompositionDomain = &picaCompositionDomain;
   hostConfig.PicaCompositionProvider = &picaCompositionTracker;
