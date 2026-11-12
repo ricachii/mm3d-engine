@@ -2002,7 +2002,7 @@ void ApplyNativeWidescreenProjectionPolicy(
     uint32_t pc, oot3d::recomp::a32::GuestState &state,
     oot3d::recomp::a32::MemoryBus &memory, void *user) {
   auto &runtime = *static_cast<NativeWidescreenProjectionState *>(user);
-  if (pc == 0x001F55CCU) {
+  if (pc == Oot3dNativeGame::ActiveMm3dBuild().ObjectFind) {
     // TRIAEVUM_OBJECT_TRACE: Object find (objects r0, id r1) with no slot
     // holding that object, once per id and caller.
     static std::set<uint64_t> reported;
