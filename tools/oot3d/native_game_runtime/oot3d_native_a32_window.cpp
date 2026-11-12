@@ -6205,17 +6205,17 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
       if (manifest->Title.Id == "mm3d") {
         uint32_t activeScreen = 0;
         uint32_t newScreen = 0;
-        if (process.Memory().Read32(0x0072F5C4U, &activeScreen) &&
-            process.Memory().Read32(0x0072F5C8U, &newScreen)) {
+        if (process.Memory().Read32(Oot3dNativeGame::Mm3dData(0x0072F5C4U), &activeScreen) &&
+            process.Memory().Read32(Oot3dNativeGame::Mm3dData(0x0072F5C8U), &newScreen)) {
           // While a menu closes the gameplay screen is already the new one:
           // the menu stays laid out until it has closed.
           uint32_t mainScreen = 0;
           const bool closingMenu =
-              newScreen != 0U && process.Memory().Read32(0x00656B04U, &mainScreen) &&
+              newScreen != 0U && process.Memory().Read32(Oot3dNativeGame::Mm3dData(0x00656B04U), &mainScreen) &&
               newScreen == mainScreen && [&] {
                 for (uint32_t index = 2; index < 8U; ++index) {
                   uint32_t screen = 0;
-                  if (process.Memory().Read32(0x00656B00U + index * 4U, &screen) &&
+                  if (process.Memory().Read32(Oot3dNativeGame::Mm3dData(0x00656B00U) + index * 4U, &screen) &&
                       screen == activeScreen) {
                     return true;
                   }
@@ -6231,7 +6231,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
           for (uint32_t index = 2; index < 8U && newScreen != 0U && !closingMenu; ++index) {
             uint32_t screen = 0;
             menuOpening = menuOpening ||
-                          (process.Memory().Read32(0x00656B00U + index * 4U, &screen) && screen == newScreen &&
+                          (process.Memory().Read32(Oot3dNativeGame::Mm3dData(0x00656B00U) + index * 4U, &screen) && screen == newScreen &&
                            newScreen != activeScreen);
           }
           const uint32_t shown =
@@ -6239,7 +6239,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
           // Title (intro, attract and logo): of the lower screen only its
           // "PRESS START", under the logo where the gameplay HUD parts would
           // have cut it into the minimap's corner.
-          constexpr uint32_t kTitleScreen = 0x006F7FBCU;
+          const uint32_t kTitleScreen = Oot3dNativeGame::Mm3dData(0x006F7FBCU);
           titleShown = shown == kTitleScreen;
           if (titleShown && mm3dAppliedHud != 3 &&
               std::getenv("TRIAEVUM_KEEP_HUD") == nullptr) {
@@ -6248,12 +6248,12 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
                 {{76.0F, 114.0F, 244.0F, 142.0F, 0.40F, 0.732F, 0.36F}});
           }
           // File select (outside the play state, not in the list).
-          constexpr uint32_t kFileSelectScreen = 0x006F79DCU;
+          const uint32_t kFileSelectScreen = Oot3dNativeGame::Mm3dData(0x006F79DCU);
           menuLayout = shown == kFileSelectScreen;
           fileSelectShown = menuLayout;
           for (uint32_t index = 0; index < 8U && shown != 0U; ++index) {
             uint32_t screen = 0;
-            if (process.Memory().Read32(0x00656B00U + index * 4U, &screen) &&
+            if (process.Memory().Read32(Oot3dNativeGame::Mm3dData(0x00656B00U) + index * 4U, &screen) &&
                 screen == shown) {
               mm3dScreen = static_cast<int>(index);
               break;
@@ -6355,7 +6355,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
         if ((mm3dScreen == 4 || mm3dScreen == 6) && std::getenv("TRIAEVUM_MENU_DEBUG")) {
           uint32_t object = 0, state = 0;
           static uint32_t lastState = ~0U;
-          if (process.Memory().Read32(0x00656B00U + mm3dScreen * 4U, &object) && object &&
+          if (process.Memory().Read32(Oot3dNativeGame::Mm3dData(0x00656B00U) + mm3dScreen * 4U, &object) && object &&
               process.Memory().Read32(object + 0x18U, &state) && state != lastState) {
             lastState = state;
             std::fprintf(stderr, "TRIAEVUM_MENU screen=%d object=%08X state=%08X\n", mm3dScreen, object, state);
@@ -6940,7 +6940,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
         uint32_t mm3dMenuCursor = 0;
         if (mm3dScreen == 4 || mm3dScreen == 6) {
           uint32_t menuObject = 0;
-          if (process.Memory().Read32(0x00656B00U + static_cast<uint32_t>(mm3dScreen) * 4U, &menuObject) &&
+          if (process.Memory().Read32(Oot3dNativeGame::Mm3dData(0x00656B00U) + static_cast<uint32_t>(mm3dScreen) * 4U, &menuObject) &&
               menuObject >= 0x100000U) {
             process.Memory().Read32(menuObject + 0x18U, &mm3dMenuCursor);
           }
