@@ -91,6 +91,7 @@ constexpr uint32_t kFsOpenFileRequest = 0x080201C2U;
 constexpr uint32_t kFsOpenFileResponse = 0x08020042U;
 constexpr uint32_t kFsOpenFileDirectlyRequest = 0x08030204U;
 constexpr uint32_t kFsOpenFileDirectlyResponse = 0x08030042U;
+constexpr uint32_t kNcchPathUpdateRomFs = 5U;  // NCCHFilePathType::UpdateRomFS
 constexpr uint32_t kFsCreateFileRequest = 0x08080202U;
 constexpr uint32_t kFsDeleteFileRequest = 0x08040142U;
 constexpr uint32_t kFsDeleteFileResponse = 0x08040040U;
@@ -3462,19 +3463,29 @@ NativeA32HostResult NativeA32CtrHostServices::HandleSvc(
                         memory.Read32(words[11], &pathType) &&
                         memory.Read32(words[11] + 4U, &pathReserved0) &&
                         memory.Read32(words[11] + 8U, &pathReserved1) &&
-                        pathType == 0U && pathReserved0 == 0U &&
-                        pathReserved1 == 0U;
-                    const bool opensRomFs = requestsRomFs &&
-                                            mConfig.RomFsImageSize != 0U &&
-                                            (mConfig.Filesystem != nullptr ||
-                                             !mConfig.RomFsImagePath.empty());
-                    if (opensRomFs) {
+                        (pathType == 0U || pathType == kNcchPathUpdateRomFs) &&
+                        pathReserved0 == 0U && pathReserved1 == 0U;
+                    // Path type 5 is the RomFS of the installed update (NCCHFilePathType::UpdateRomFS in
+                    // Citra/Azahar): the eShop 1.1.0 build of Majora's Mask 3D opens it. It is served from its own
+                    // image (manifest source.update_romfs_image_path); without one the request stays unanswered.
+                    const bool requestsUpdateRomFs = requestsRomFs && pathType == kNcchPathUpdateRomFs;
+                    const bool opensRomFs =
+                        requestsRomFs && !requestsUpdateRomFs && mConfig.RomFsImageSize != 0U &&
+                        (mConfig.Filesystem != nullptr || !mConfig.RomFsImagePath.empty());
+                    const bool opensUpdateRomFs = requestsUpdateRomFs && mConfig.UpdateRomFsImageSize != 0U &&
+                                                  mConfig.Filesystem == nullptr &&
+                                                  !mConfig.UpdateRomFsImagePath.empty();
+                    if (opensRomFs || opensUpdateRomFs) {
                         auto file = std::make_shared<KernelObject>();
                         file->Type = "client_session:file:romfs";
-                        file->FileOffset = mConfig.RomFsImageOffset;
-                        file->FileSize = mConfig.RomFsImageSize;
+                        file->FileOffset = opensUpdateRomFs ? mConfig.UpdateRomFsImageOffset : mConfig.RomFsImageOffset;
+                        file->FileSize = opensUpdateRomFs ? mConfig.UpdateRomFsImageSize : mConfig.RomFsImageSize;
                         bool opened = false;
-                        if (mConfig.Filesystem != nullptr) {
+                        if (opensUpdateRomFs) {
+                            file->FilePath = mConfig.UpdateRomFsImagePath;
+                            file->RomFsBacking = std::make_shared<RomFsBackingFile>(file->FilePath);
+                            opened = true;
+                        } else if (mConfig.Filesystem != nullptr) {
                             file->FilePath = mConfig.RomFsContentPath;
                             opened =
                                 mConfig.Filesystem->Open(

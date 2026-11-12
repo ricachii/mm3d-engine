@@ -56,6 +56,9 @@ struct NativeA32ProcessImageManifest {
     uint64_t RomFsImageFileSize = 0;
     uint64_t RomFsImageOffset = 0;
     uint64_t RomFsImageSize = 0;
+    // Optional, from source.update_romfs_image_path (+ _file_size): the update's RomFS image.
+    std::filesystem::path UpdateRomFsImagePath;
+    uint64_t UpdateRomFsImageFileSize = 0;
     std::string ProcessName;
     uint32_t EntryAddress = 0;
     uint32_t PageSize = 0;

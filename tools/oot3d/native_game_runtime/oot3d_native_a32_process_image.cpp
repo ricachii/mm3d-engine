@@ -117,6 +117,17 @@ ParseNativeA32ProcessImageManifest(const Json& document,
         result.RomFsImageOffset =
             source.at("romfs_service_offset").get<uint64_t>();
         result.RomFsImageSize = source.at("romfs_service_size").get<uint64_t>();
+        if (source.contains("update_romfs_image_path")) {
+            result.UpdateRomFsImagePath = ResolvePackagedInputPath(
+                result.ManifestPath, source.at("update_romfs_image_path").get<std::string>());
+            result.UpdateRomFsImageFileSize = source.at("update_romfs_image_file_size").get<uint64_t>();
+            if (result.UpdateRomFsImageFileSize == 0 ||
+                !std::filesystem::is_regular_file(result.UpdateRomFsImagePath) ||
+                std::filesystem::file_size(result.UpdateRomFsImagePath) != result.UpdateRomFsImageFileSize) {
+                result.UpdateRomFsImagePath.clear();
+                result.UpdateRomFsImageFileSize = 0;
+            }
+        }
         result.ProcessName = process.at("name").get<std::string>();
         if (document.contains("title")) {
             const auto& title = document.at("title");

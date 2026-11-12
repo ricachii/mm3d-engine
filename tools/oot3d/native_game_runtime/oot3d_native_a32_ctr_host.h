@@ -217,6 +217,10 @@ struct NativeA32CtrHostConfig {
     std::filesystem::path RomFsImagePath;
     uint64_t RomFsImageOffset = 0;
     uint64_t RomFsImageSize = 0;
+    // Optional RomFS of the installed update (file path type 5 of fs:USER OpenFileDirectly).
+    std::filesystem::path UpdateRomFsImagePath;
+    uint64_t UpdateRomFsImageOffset = 0;
+    uint64_t UpdateRomFsImageSize = 0;
     NativeA32CtrFilesystem* Filesystem = nullptr;
     std::string RomFsContentPath = "inputs/romfs";
     Oot3dNativePicaFrontend* PicaFrontend = nullptr;
