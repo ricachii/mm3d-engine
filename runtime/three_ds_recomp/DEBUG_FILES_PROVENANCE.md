@@ -22,3 +22,10 @@ The upstream revision `7875f7d1` itself could not be fetched (`not our ref`).
 
 These files derive from libultraship (https://github.com/Kenix3/libultraship, MIT) as modified in TriAevum
 (GPL-3.0-or-later); credit to their authors and to Volpe34 for mm3d-pc.
+
+## Also hidden: `log/` (`.gitignore` line 95, `[Ll]og/`)
+
+| File | SHA-256 (first 12) | Source commit |
+|---|---|---|
+| include/three_ds_recomp/legacy/log/luslog.h | f30abace04a5 | TriAevum-Switch snapshot `034820ca` |
+| src/legacy_compat/log/luslog.cpp | c8df7460ab57 | TriAevum-Switch snapshot `034820ca` |
