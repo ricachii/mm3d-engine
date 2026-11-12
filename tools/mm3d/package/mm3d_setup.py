@@ -29,14 +29,31 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]               # the TriAevum tree (tools/mm3d/package/..)
 MM3D = REPO / "tools/mm3d"
-RECIPE = HERE / "recipe"
-SUPPORTED = {
-    # code.bin SHA-256 -> version
-    "6eec27b1827eab2c87744ac38066d569ffe6fe75790b1eb3300bd91f5099038d": "USA v1.1",
+RECIPE = HERE / "recipe"   # the original build's; BUILDS has the recipe of each supported build
+# Supported builds of the game code, by the SHA-256 of the decompressed code.bin. Each build has its own
+# translation recipe (addresses only), the size of its executable segment, and the host-side address table
+# (tools/oot3d/native_game_runtime/mm3d_build.h) selected by the manifest's title.variant.
+BUILDS = {
+    "6eec27b1827eab2c87744ac38066d569ffe6fe75790b1eb3300bd91f5099038d": {
+        "version": "USA v1.1",
+        "recipe": HERE / "recipe",
+        "executable_size": "0x51d000",
+        "variant": "",
+        # romfs.bin SHA-256 of a clean USA v1.1 dump. Anything else (a romfs of
+        # another version/region, a modded or partial dump) can crash at boot.
+        "clean_romfs": {"7b64a50a303eb4b9ec0939630d5e77b8e89a92ea129ea06f73b67d20a1ec024a"},
+    },
+    # The v1.1.0 eShop update merged with the base game (tools/mm3d/make_cci.py). Its recipe is the original one
+    # relocated with tools/mm3d/relocate_recipe.py.
+    "a1d1724df4857a68df200d2543ab6c96df172738fe511f58168b77c58fe36e05": {
+        "version": "USA v1.1.0 (eShop update)",
+        "recipe": HERE / "recipe_eshop110",
+        "executable_size": "0x51e000",
+        "variant": "eshop110",
+        "clean_romfs": {"1f41aee51cd7bf1371b812eaa1d74f86815332be57e204b709a351191c234e78"},
+    },
 }
-# romfs.bin SHA-256 of a clean USA v1.1 dump. Anything else (a romfs of
-# another version/region, a modded or partial dump) can crash at boot.
-CLEAN_ROMFS = {"7b64a50a303eb4b9ec0939630d5e77b8e89a92ea129ea06f73b67d20a1ec024a"}
+SUPPORTED = {code_hash: build["version"] for code_hash, build in BUILDS.items()}
 TITLE = {"id": "mm3d", "program_id": "0004000000125500", "region": 1, "language": 1}
 
 
@@ -243,9 +260,9 @@ def extract(rom: Path, game: Path) -> None:
              "'decrypted' option or a decryption tool) and run Setup again.")
 
 
-def prepare_work(work: Path) -> None:
+def prepare_work(work: Path, recipe: Path) -> None:
     work.mkdir(parents=True, exist_ok=True)
-    for item in RECIPE.iterdir():
+    for item in recipe.iterdir():
         if item.name.endswith(".xz"):
             target = work / item.name[:-3]
             if not target.exists():
@@ -264,8 +281,8 @@ def prepare_work(work: Path) -> None:
         shutil.copy2(work / "call_sites.json", work / "aot_program.json")
 
 
-def known_selection(program_path: Path) -> dict | None:
-    recipe = RECIPE / "selection.json.xz"
+def known_selection(program_path: Path, recipe_dir: Path) -> dict | None:
+    recipe = recipe_dir / "selection.json.xz"
     if not recipe.is_file():
         return None
     with lzma.open(recipe, "rt") as source:
@@ -276,7 +293,7 @@ def known_selection(program_path: Path) -> dict | None:
     return selection if actual == expected else None
 
 
-def translate(work: Path, game: Path) -> None:
+def translate(work: Path, game: Path, build: dict) -> None:
     python = sys.executable
     env = dict(os.environ, MM3D_WORK=str(work))
     for attempt in range(1, 5):
@@ -290,7 +307,7 @@ def translate(work: Path, game: Path) -> None:
         run([python, MM3D / "mm3d_whole_aot_program.py", "--thumb-inventory", work / "thumb_inventory2.json",
              "--thumb-map", work / "thumb_map.json", "--code", work / "code_thumbfree.bin",
              "--inventory", work / "mm3d_inventory.csv", "--boundary-audit", work / "empty_boundary_audit.csv",
-             "--executable-size", "0x51d000", "--output", work / "aot_program.json", "--force"], env=env)
+             "--executable-size", build["executable_size"], "--output", work / "aot_program.json", "--force"], env=env)
         program = json.loads((work / "aot_program.json").read_text())
         unresolved = [e for f in program["functions"] for e in f["unresolved_static_edges"]]
         if not unresolved and program["counts"]["unclaimed_blocks"] == 0:
@@ -298,7 +315,7 @@ def translate(work: Path, game: Path) -> None:
     else:
         fail("The code translation did not converge (unexpected for a supported ROM).")
     step("Selecting functions")
-    known = known_selection(work / "aot_program.json")
+    known = known_selection(work / "aot_program.json", build["recipe"])
     if known is not None:
         # The translation gave exactly the program the recipe's selection was made
         # from: the selection (hours with Python on some Windows PCs) is known.
@@ -356,13 +373,14 @@ def main() -> int:
         extract(rom, game)
     else:
         print(f"  already extracted to {game}")
-    version = SUPPORTED.get(sha256(game / "code.bin"))
+    build = BUILDS.get(sha256(game / "code.bin"))
+    version = build["version"] if build else None
     if version is None:
         shutil.rmtree(game, ignore_errors=True)
         fail("This ROM version is not supported. Supported: Majora's Mask 3D " +
              ", ".join(SUPPORTED.values()) + " (decrypted .3ds/.cci).")
     print(f"  Majora's Mask 3D {version}")
-    if sha256(game / "romfs.bin") not in CLEAN_ROMFS:
+    if sha256(game / "romfs.bin") not in build["clean_romfs"]:
         print("  WARNING: the game data (romfs) of this ROM is not a clean USA v1.1 dump.\n"
               "  If the game does not start or crashes, dump the ROM again from an\n"
               "  unmodified game: no mods or patches (Project Restoration, texture packs\n"
@@ -370,8 +388,8 @@ def main() -> int:
 
     work = install / "work"
     step("Preparing the translation recipe")
-    prepare_work(work)
-    translate(work, game)
+    prepare_work(work, build["recipe"])
+    translate(work, game, build)
     plugin = compile_title(work, args, platform)
     private = install / "private"
     private.mkdir(exist_ok=True)
@@ -384,7 +402,7 @@ def main() -> int:
          "--exheader", game / "exheader.bin", "--code-bin", game / "code.bin",
          "--romfs-image", game / "romfs.bin", "--output", manifest])
     data = json.loads(manifest.read_text())
-    data["title"] = TITLE
+    data["title"] = dict(TITLE, **({"variant": build["variant"]} if build["variant"] else {}))
 
     def relative(value):
         # Paths relative to the folder (Play starts there), so it can be moved.

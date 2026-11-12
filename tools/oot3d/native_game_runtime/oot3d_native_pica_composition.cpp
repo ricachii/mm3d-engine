@@ -215,8 +215,9 @@ std::span<const uint32_t> Oot3dNativePicaCompositionHookPcs() noexcept {
 }
 
 std::span<const uint32_t> Mm3dNativePicaCompositionHookPcs() noexcept {
-    static constexpr std::array kHooks{kMm3dModelDrawEntry, kMm3dPrimitiveSetDrawEntry,
-                                       kMm3dModelDrawReturn};
+    // Filled on the first call, after the title's build has been selected.
+    static const std::array<uint32_t, 3> kHooks{Mm3dModelDrawEntry(), Mm3dPrimitiveSetDrawEntry(),
+                                                Mm3dModelDrawReturn()};
     return kHooks;
 }
 
@@ -287,11 +288,11 @@ void Oot3dNativePicaCompositionTracker::CloseMm3dPart(uint32_t end) {
 void Oot3dNativePicaCompositionTracker::ObserveMm3dBlockEntry(
     uint32_t pc, const oot3d::recomp::a32::GuestState& state,
     oot3d::recomp::a32::MemoryBus& memory) {
-    if (pc == kMm3dPrimitiveSetDrawEntry) {
+    if (pc == Mm3dPrimitiveSetDrawEntry()) {
         static const bool disabled = std::getenv("TRIAEVUM_NO_MODEL_POSES") != nullptr;
         uint32_t cursor = 0U;
         if (disabled || !mActiveModelDraw.has_value() || state.r[0] != mActiveModelDraw->Model ||
-            !memory.Read32(kMm3dCommandListCursorAddress, &cursor))
+            !memory.Read32(Mm3dCommandListCursorAddress(), &cursor))
             return;
         CloseMm3dPart(cursor);
         auto& draw = *mActiveModelDraw;
@@ -331,12 +332,12 @@ void Oot3dNativePicaCompositionTracker::ObserveMm3dBlockEntry(
         draw.Part = std::move(skinning);
         return;
     }
-    if (pc == kMm3dModelDrawEntry) {
+    if (pc == Mm3dModelDrawEntry()) {
         ++mStats.ModelDrawEntries;
         mActiveModelDraw.reset();
         uint32_t cursor = 0U;
-        if (state.r[14] != kMm3dModelDrawReturn ||
-            !memory.Read32(kMm3dCommandListCursorAddress, &cursor)) {
+        if (state.r[14] != Mm3dModelDrawReturn() ||
+            !memory.Read32(Mm3dCommandListCursorAddress(), &cursor)) {
             ++mStats.ReadFailures;
             return;
         }
@@ -344,7 +345,7 @@ void Oot3dNativePicaCompositionTracker::ObserveMm3dBlockEntry(
         // ranges recorded in that buffer by earlier frames are stale.
         uint32_t list = 0U;
         uint32_t base = 0U;
-        if (memory.Read32(kMm3dGraphicsContextAddress + 0x9CU, &list) &&
+        if (memory.Read32(Mm3dGraphicsContextAddress() + 0x9CU, &list) &&
             memory.Read32(list + 4U, &base) &&
             (base != mModelListBase || cursor < mModelListCursor)) {
             mModelSpans.erase(mModelSpans.lower_bound(base),
@@ -359,11 +360,11 @@ void Oot3dNativePicaCompositionTracker::ObserveMm3dBlockEntry(
         mActiveModelDraw = ActiveModelDraw{state.r[0], cursor};
         return;
     }
-    if (pc != kMm3dModelDrawReturn || !mActiveModelDraw.has_value()) {
+    if (pc != Mm3dModelDrawReturn() || !mActiveModelDraw.has_value()) {
         return;
     }
     uint32_t end = 0U;
-    if (!memory.Read32(kMm3dCommandListCursorAddress, &end)) {
+    if (!memory.Read32(Mm3dCommandListCursorAddress(), &end)) {
         ++mStats.ReadFailures;
         mActiveModelDraw.reset();
         return;
@@ -403,7 +404,7 @@ bool Oot3dNativePicaCompositionTracker::ResolveCommandAddress(
     }
     attribution = {Oot3dPicaCompositionLayer::Unknown,
                    Oot3dPicaCompositionProvenance::NativeModelInstance,
-                   kMm3dModelDrawEntry, it->second.Model};
+                   Mm3dModelDrawEntry(), it->second.Model};
     return true;
 }
 

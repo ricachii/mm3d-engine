@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mm3d_build.h"
 #include "oot3d_native_pica_frontend.h"
 
 #include <cstdint>
@@ -45,16 +46,17 @@ std::span<const uint32_t> Oot3dNativePicaCompositionHookPcs() noexcept;
 
 // Majora's Mask 3D v1.1: the model draw (r0 = model instance; it walks the
 // meshes and calls each mesh's prebuilt command block) and its only return.
-inline constexpr uint32_t kMm3dModelDrawEntry = 0x005E9254U;
-inline constexpr uint32_t kMm3dModelDrawReturn = 0x005EAD48U;
+// (addresses per build of the game code: mm3d_build.h)
+inline uint32_t Mm3dModelDrawEntry() { return ActiveMm3dBuild().ModelDrawEntry; }
+inline uint32_t Mm3dModelDrawReturn() { return ActiveMm3dBuild().ModelDrawReturn; }
 // Per primitive set of a mesh (r0 = model instance, r1 = the mesh's shape:
 // [0] its base, [4] the primitive sets' offsets, r2 = which set): loads the
 // set's bone matrices, before the set's draw.
-inline constexpr uint32_t kMm3dPrimitiveSetDrawEntry = 0x005E9504U;
-inline constexpr uint32_t kMm3dCommandListCursorAddress = 0x006A3A88U;
+inline uint32_t Mm3dPrimitiveSetDrawEntry() { return ActiveMm3dBuild().PrimitiveSetDrawEntry; }
+inline uint32_t Mm3dCommandListCursorAddress() { return Mm3dData(0x006A3A88U); }
 // Graphics context; +0x9C points to the bound command list, whose buffer
 // base is at +4.
-inline constexpr uint32_t kMm3dGraphicsContextAddress = 0x007B2700U;
+inline uint32_t Mm3dGraphicsContextAddress() { return Mm3dData(0x007B2700U); }
 std::span<const uint32_t> Mm3dNativePicaCompositionHookPcs() noexcept;
 
 struct Oot3dNativePicaCompositionStats {

@@ -105,4 +105,7 @@ void ApplyMm3dCheats(Mm3dCheats& cheats, oot3d::recomp::a32::MemoryBus& memory, 
 // from the main loop while the guest waits, once per game frame in play.
 void ProcessMm3dSpawn(Mm3dCheats& cheats, NativeA32Process& process, uint32_t gctx);
 
+// Selects the addresses of the active build (mm3d_build.h) for the cheats and the warp.
+void ConfigureMm3dCheatsBuild();
+
 }  // namespace Oot3dNativeGame

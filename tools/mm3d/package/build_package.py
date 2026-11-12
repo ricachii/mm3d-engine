@@ -149,7 +149,9 @@ def main() -> int:
     package.mkdir(parents=True, exist_ok=True)
     for name in ("mm3d_setup.py", "prepare_shaders.py", "merge_pipelines.py", "shader_tour.py"):
         shutil.copy2(HERE / name, package / name)
-    shutil.copytree(HERE / "recipe", package / "recipe")
+    for recipe_name in ("recipe", "recipe_eshop110"):      # one recipe per supported build of the code
+        if (HERE / recipe_name).is_dir():
+            shutil.copytree(HERE / recipe_name, package / recipe_name)
     (package / "lib").mkdir()
     copy_tree(args.nlohmann / "nlohmann", package / "include/nlohmann", lambda p: True)
     if windows:

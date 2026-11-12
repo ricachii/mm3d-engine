@@ -1,3 +1,4 @@
+#include "mm3d_build.h"
 #include "mm3d_cheats.h"
 
 #include "oot3d_native_a32_process.h"
@@ -19,23 +20,23 @@ namespace Oot3dNativeGame {
 namespace {
 
 // USA v1.1 save (read at runtime; the CTRPF codes' addresses less 0x1000).
-constexpr uint32_t kSaveTime = 0x7751F8U;          // u16, 0x4000 = 6 AM
-constexpr uint32_t kHealthMax = 0x775312U;         // u16, 0x10 per heart
-constexpr uint32_t kHealth = 0x775314U;            // u16
-constexpr uint32_t kMagicLevel = 0x775316U;        // u8, 0 none, 1 normal, 2 double
-constexpr uint32_t kMagic = 0x775317U;             // u8, 0x30 per level
-constexpr uint32_t kRupees = 0x775318U;            // u16
-constexpr uint32_t kRazorSwordHits = 0x77531AU;    // u16, 100 when new
-constexpr uint32_t kSwordShield = 0x775352U;       // u8: sword in the low nibble (2 = Razor)
-constexpr uint32_t kItems = 0x775354U;             // u8[24] by slot, 0xFF empty
-constexpr uint32_t kAmmo = 0x775390U;              // u8[24] by slot
-constexpr uint32_t kUpgrades = 0x7753CCU;          // u32: quiver 0-2, bomb bag 3-5, wallet 12-13,
+uint32_t kSaveTime = 0x7751F8U;          // u16, 0x4000 = 6 AM
+uint32_t kHealthMax = 0x775312U;         // u16, 0x10 per heart
+uint32_t kHealth = 0x775314U;            // u16
+uint32_t kMagicLevel = 0x775316U;        // u8, 0 none, 1 normal, 2 double
+uint32_t kMagic = 0x775317U;             // u8, 0x30 per level
+uint32_t kRupees = 0x775318U;            // u16
+uint32_t kRazorSwordHits = 0x77531AU;    // u16, 100 when new
+uint32_t kSwordShield = 0x775352U;       // u8: sword in the low nibble (2 = Razor)
+uint32_t kItems = 0x775354U;             // u8[24] by slot, 0xFF empty
+uint32_t kAmmo = 0x775390U;              // u8[24] by slot
+uint32_t kUpgrades = 0x7753CCU;          // u32: quiver 0-2, bomb bag 3-5, wallet 12-13,
                                                    // sticks 17-19, nuts 20-22
-constexpr uint32_t kQuestStatus = 0x7753D0U;       // u32: remains 0-3, songs 6-17, notebook 18,
+uint32_t kQuestStatus = 0x7753D0U;       // u32: remains 0-3, songs 6-17, notebook 18,
                                                    // heart pieces 28-31
-constexpr uint32_t kMagicAcquired = 0x77531EU;     // u8, then double magic, double defense
-constexpr uint32_t kButtonItems = 0x77532AU;       // u8[4][5] per form (B first)
-constexpr uint32_t kWeekEvents = 0x776428U;        // u8 weekEventReg[100] (N64 numbering)
+uint32_t kMagicAcquired = 0x77531EU;     // u8, then double magic, double defense
+uint32_t kButtonItems = 0x77532AU;       // u8[4][5] per form (B first)
+uint32_t kWeekEvents = 0x776428U;        // u8 weekEventReg[100] (N64 numbering)
 
 // Their lairs and the flags that make them stay away once beaten (as N64:
 // WEEKEVENTREG_CLEARED_*_TEMPLE; Odolwa's checked at 0x349088).
@@ -433,13 +434,13 @@ namespace {
 // in s0-s2; rotY, rotZ, params on the stack), the object slots at play +
 // 0x9438 (find, request a load, loaded?) and the actor context at +0x20B0
 // (category lists from +0x10, 0xC each: count, first; next actor +0x134).
-constexpr uint32_t kActorTable = 0x657768U;
+uint32_t kActorTable = 0x657768U;
 constexpr uint32_t kActorCount = 0x22CU;
-constexpr uint32_t kActorSpawn = 0x22053CU;
-constexpr uint32_t kObjectFind = 0x1F55CCU;
-constexpr uint32_t kObjectRequest = 0x1F3F5CU;
-constexpr uint32_t kObjectLoaded = 0x1DF798U;
-constexpr uint32_t kObjectFree = 0x1F4FB0U;  // (objects, slot)
+uint32_t kActorSpawn = 0x22053CU;
+uint32_t kObjectFind = 0x1F55CCU;
+uint32_t kObjectRequest = 0x1F3F5CU;
+uint32_t kObjectLoaded = 0x1DF798U;
+uint32_t kObjectFree = 0x1F4FB0U;  // (objects, slot)
 constexpr uint32_t kCallReturn = 0x60000000U;
 
 bool CallGuest(NativeA32Process& process, uint32_t entry, std::initializer_list<uint32_t> registers,
@@ -639,6 +640,32 @@ namespace Oot3dNativeGame {
 const Mm3dBoss* Mm3dBosses(int* count) {
     *count = static_cast<int>(std::size(kBosses));
     return kBosses;
+}
+
+// Addresses of the active build of the game code (mm3d_build.h); call once after the title's build is selected.
+void ConfigureMm3dCheatsBuild() {
+  const Mm3dBuild& build = ActiveMm3dBuild();
+  kSaveTime = Mm3dData(0x7751F8U);
+  kHealthMax = Mm3dData(0x775312U);
+  kHealth = Mm3dData(0x775314U);
+  kMagicLevel = Mm3dData(0x775316U);
+  kMagic = Mm3dData(0x775317U);
+  kRupees = Mm3dData(0x775318U);
+  kRazorSwordHits = Mm3dData(0x77531AU);
+  kSwordShield = Mm3dData(0x775352U);
+  kItems = Mm3dData(0x775354U);
+  kAmmo = Mm3dData(0x775390U);
+  kUpgrades = Mm3dData(0x7753CCU);
+  kQuestStatus = Mm3dData(0x7753D0U);
+  kMagicAcquired = Mm3dData(0x77531EU);
+  kButtonItems = Mm3dData(0x77532AU);
+  kWeekEvents = Mm3dData(0x776428U);
+  kActorTable = Mm3dData(0x657768U);
+  kActorSpawn = build.ActorSpawn;
+  kObjectFind = build.ObjectFind;
+  kObjectRequest = build.ObjectRequest;
+  kObjectLoaded = build.ObjectLoaded;
+  kObjectFree = build.ObjectFree;
 }
 
 }  // namespace Oot3dNativeGame

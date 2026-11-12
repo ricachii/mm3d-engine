@@ -7,6 +7,8 @@
 #include "oot3d/renderer/azahar_texture_pack.h"
 #include "fast/renderer3ds/pica_program_preparation.h"
 #include "oot3d_game_language_panel.h"
+#include "mm3d_build.h"
+#include "mm3d_cheats.h"
 #include "mm3d_f1_panels.h"
 #ifdef OOT3D_WHOLE_AOT_PRODUCT_MODE
 #include "oot3d_native_crash_diagnostics.h"
@@ -1912,7 +1914,7 @@ bool ExecuteNativeCandidate(uint32_t pc, oot3d::recomp::a32::GuestState &state,
 bool ReadMm3dPlayCamera(oot3d::recomp::a32::MemoryBus &memory,
                         std::array<float, 3> &eye, std::array<float, 3> &at) {
   uint32_t context = 0, game = 0, type = 0, indices = 0;
-  if (!memory.Read32(0x0072F5C0U, &context) || context < 0x100000U ||
+  if (!memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &context) || context < 0x100000U ||
       !memory.Read32(context + 0x16CU, &game) || game < 0x100000U || (game & 3U) != 0U ||
       !memory.Read32(game + 0x13CU, &type) || ((type >> 8U) & 0xFFU) != 4U ||
       !memory.Read32(game + 0xA78U, &indices) || (indices >> 16U) > 3U) {
@@ -1948,7 +1950,7 @@ void MoveMm3dTatlAlert(oot3d::recomp::a32::MemoryBus &memory) {
   static bool isAlert = false;
   static uint32_t originalBits = 0, writtenBits = 0;
   uint32_t hud = 0, widget = 0, bits = 0, flags = 0, active = 0;
-  if (offset == 0.0F || !memory.Read32(0x006B7B8CU + 0x10U, &hud) || hud == 0U ||
+  if (offset == 0.0F || !memory.Read32(Oot3dNativeGame::Mm3dData(0x006B7B8CU) + 0x10U, &hud) || hud == 0U ||
       !memory.Read32(hud + 0x170U, &widget) || widget == 0U) {
     return;
   }
@@ -2020,7 +2022,7 @@ void ApplyNativeWidescreenProjectionPolicy(
     // its pad state is at +0x28, the right stick's at +0x70.
     uint32_t root = 0, gctx = 0;
     uint8_t type = 0;
-    if (memory.Read32(0x0072F5C0U, &root) && memory.Read32(root + 0x16CU, &gctx) && gctx != 0U &&
+    if (memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &root) && memory.Read32(root + 0x16CU, &gctx) && gctx != 0U &&
         memory.Read8(gctx + 0x13DU, &type) && type == 4U) {
       // The camera turns by the stick's last raw values (+0x80, +0x84: x and
       // y, -60..60); the others are left to the rest of the game.
@@ -3949,31 +3951,35 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
       // Project Restoration's code.bin is a relinked build: its functions
       // sit at other addresses (data and .bss are unchanged).
       const bool restoration = manifest->Title.Variant == "restoration";
-      widescreenProjection.FrustumPc = restoration ? 0x00123010U : 0x00122FE8U;
-      widescreenProjection.OrthographicPc = restoration ? 0x00131838U : 0x00131810U;
+      // The addresses of this build of the game code (mm3d_build.h): USA v1.1, the eShop v1.1.0 update
+      // or Project Restoration.
+      const Oot3dNativeGame::Mm3dBuild &mm3dBuild = Oot3dNativeGame::SelectMm3dBuild(manifest->Title.Variant);
+      Oot3dNativeGame::ConfigureMm3dCheatsBuild();
+      widescreenProjection.FrustumPc = mm3dBuild.FrustumPc;
+      widescreenProjection.OrthographicPc = mm3dBuild.OrthographicPc;
       widescreenProjection.FrustumAspect = 400.0F / 240.0F;
       widescreenProjection.Mm3dPlayCamera = std::getenv("TRIAEVUM_MM3D_LATE_CAMERA") == nullptr;
       if (Oot3dNativeGame::TriAevumWidescreenEnabled()) {
         blockEntryHooks.push_back(widescreenProjection.FrustumPc);
       }
       if (std::getenv("TRIAEVUM_NO_HD_PAUSE") == nullptr) {
-        widescreenProjection.PauseTextureSetupPc = restoration ? 0x00141D88U : 0x00141D44U;
+        widescreenProjection.PauseTextureSetupPc = mm3dBuild.PauseTextureSetupPc;
         blockEntryHooks.push_back(widescreenProjection.PauseTextureSetupPc);
-        widescreenProjection.PauseCapturePc = restoration ? 0x00120608U : 0x001205E0U;
+        widescreenProjection.PauseCapturePc = mm3dBuild.PauseCapturePc;
         blockEntryHooks.push_back(widescreenProjection.PauseCapturePc);
       }
       if (std::getenv("TRIAEVUM_NO_CAPTURE_READBACK") == nullptr) {
-        widescreenProjection.CaptureDriverPc = restoration ? 0x00112358U : 0x0011232CU;
+        widescreenProjection.CaptureDriverPc = mm3dBuild.CaptureDriverPc;
         blockEntryHooks.push_back(widescreenProjection.CaptureDriverPc);
       }
       if (!restoration) {
-        widescreenProjection.LayoutPassPc = 0x001267E8U;
+        widescreenProjection.LayoutPassPc = mm3dBuild.LayoutPassPc;
         blockEntryHooks.push_back(widescreenProjection.LayoutPassPc);
-        widescreenProjection.PlayCalcPc = 0x0014F550U;  // GameState+0x104 of the play state
+        widescreenProjection.PlayCalcPc = mm3dBuild.PlayCalcPc;  // GameState+0x104 of the play state
         widescreenProjection.Cheats = mm3dCheats.get();
         blockEntryHooks.push_back(widescreenProjection.PlayCalcPc);
         // TRIAEVUM_OBJECT_TRACE: object lookups that find nothing (tests).
-        if (std::getenv("TRIAEVUM_OBJECT_TRACE") != nullptr) blockEntryHooks.push_back(0x001F55CCU);
+        if (std::getenv("TRIAEVUM_OBJECT_TRACE") != nullptr) blockEntryHooks.push_back(mm3dBuild.ObjectFind);
       }
       // Each draw carries the model instance that submitted it, so frame
       // interpolation pairs a model with itself whatever the draw order.
@@ -5007,7 +5013,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
       static uint64_t unwrapped = 0;
       static uint16_t lastTime = 0;
       uint16_t timeOfDay = 0;
-      if (process.Memory().Read16(0x7751D8U + 0x20U, &timeOfDay)) {
+      if (process.Memory().Read16(Oot3dNativeGame::Mm3dData(0x7751D8U) + 0x20U, &timeOfDay)) {
         if (!haveFirst) { haveFirst = true; firstTime = lastTime = timeOfDay; }
         unwrapped += static_cast<uint16_t>(timeOfDay - lastTime);
         lastTime = timeOfDay;
@@ -5028,7 +5034,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
         static bool peeked = false;
         auto &memory = process.Memory();
         uint32_t context = 0, game = 0, type = 0;
-        if (!peeked && memory.Read32(0x0072F5C0U, &context) && context >= 0x100000U &&
+        if (!peeked && memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &context) && context >= 0x100000U &&
             memory.Read32(context + 0x16CU, &game) && game >= 0x100000U &&
             memory.Read32(game + 0x13CU, &type) && ((type >> 8U) & 0xFFU) == 4U) {
           peeked = true;
@@ -5048,7 +5054,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
         static bool poked = false;
         auto &memory = process.Memory();
         uint32_t context = 0, game = 0, type = 0;
-        if (!poked && memory.Read32(0x0072F5C0U, &context) && context >= 0x100000U &&
+        if (!poked && memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &context) && context >= 0x100000U &&
             memory.Read32(context + 0x16CU, &game) && game >= 0x100000U && (game & 3U) == 0U &&
             memory.Read32(game + 0x13CU, &type) && ((type >> 8U) & 0xFFU) == 4U) {
           poked = true;
@@ -5097,7 +5103,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
         if (std::getenv("TRIAEVUM_PLAYER_DEBUG")) {
           static int playerDebug = 0;
           uint32_t c = 0, g = 0, player = 0, flags = 0;
-          if ((playerDebug++ % 30) == 0 && memory.Read32(0x0072F5C0U, &c) && c &&
+          if ((playerDebug++ % 30) == 0 && memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &c) && c &&
               memory.Read32(c + 0x16CU, &g) && g && memory.Read32(g + 0x20DCU, &player) && player &&
               memory.Read32(player + 0x11DB0U, &flags))
             std::fprintf(stderr, "TRIAEVUM_PLAYER player=%08X flags1=%08X\n", player, flags);
@@ -5113,12 +5119,12 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
         static int warpDebug = 0;
         if (std::getenv("TRIAEVUM_WARP_DEBUG") && (warpDebug++ % 200) == 0) {
           uint32_t c = 0, g = 0, t = 0;
-          memory.Read32(0x0072F5C0U, &c); if (c) memory.Read32(c + 0x16CU, &g); if (g) memory.Read32(g + 0x13CU, &t);
+          memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &c); if (c) memory.Read32(c + 0x16CU, &g); if (g) memory.Read32(g + 0x13CU, &t);
           std::fprintf(stderr, "TRIAEVUM_WARP_DEBUG context=%08X game=%08X type=%08X\n", c, g, t);
         }
         if (nextWarp < warpEntrances.size() &&
             std::chrono::duration<double>(std::chrono::steady_clock::now() - lastWarp).count() >= warpSeconds &&
-            memory.Read32(0x0072F5C0U, &context) && context >= 0x100000U &&
+            memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &context) && context >= 0x100000U &&
             memory.Read32(context + 0x16CU, &game) && game >= 0x100000U && (game & 3U) == 0U &&
             memory.Read32(game + 0x13CU, &type) && ((type >> 8U) & 0xFFU) == 4U) {
           // TRIAEVUM_PLAYER_FORM: 0 Fierce Deity, 1 Goron, 2 Zora, 3 Deku, 4 human
@@ -5126,10 +5132,10 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
           if (const char *form = std::getenv("TRIAEVUM_PLAYER_FORM")) {
             uint16_t timeOfDay = 0;
             uint8_t currentForm = 0;
-            memory.Read16(0x7751D8U + 0x20U, &timeOfDay);
-            memory.Read8(0x7751D8U + 0x26U, &currentForm);
+            memory.Read16(Oot3dNativeGame::Mm3dData(0x7751D8U) + 0x20U, &timeOfDay);
+            memory.Read8(Oot3dNativeGame::Mm3dData(0x7751D8U) + 0x26U, &currentForm);
             std::fprintf(stderr, "TRIAEVUM_PLAYER_FORM time=0x%04X form=%u -> %s\n", timeOfDay, currentForm, form);
-            memory.Write8(0x7751D8U + 0x26U, static_cast<uint8_t>(std::atoi(form)));
+            memory.Write8(Oot3dNativeGame::Mm3dData(0x7751D8U) + 0x26U, static_cast<uint8_t>(std::atoi(form)));
           }
           memory.Write16(game + 0xC52EU, warpEntrances[nextWarp]);
           memory.Write8(game + 0xC529U, 0x14U);
@@ -5147,7 +5153,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
       // trigger +0xC529), only in the play state.
       auto &memory = process.Memory();
       uint32_t context = 0, game = 0, type = 0;
-      const bool inPlay = memory.Read32(0x0072F5C0U, &context) && context >= 0x100000U &&
+      const bool inPlay = memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &context) && context >= 0x100000U &&
                           memory.Read32(context + 0x16CU, &game) && game >= 0x100000U && (game & 3U) == 0U &&
                           memory.Read32(game + 0x13CU, &type) && ((type >> 8U) & 0xFFU) == 4U;
       mm3dWarpRequest->InPlay = inPlay;
@@ -5167,7 +5173,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
       const int entrance = mm3dWarpRequest->Entrance.load();
       if (entrance >= 0 && inPlay) {
         const int form = mm3dWarpRequest->Form.exchange(-1);
-        if (form >= 0 && form <= 4) memory.Write8(0x7751D8U + 0x26U, static_cast<uint8_t>(form));
+        if (form >= 0 && form <= 4) memory.Write8(Oot3dNativeGame::Mm3dData(0x7751D8U) + 0x26U, static_cast<uint8_t>(form));
         memory.Write16(game + 0xC52EU, static_cast<uint16_t>(entrance));
         memory.Write8(game + 0xC529U, 0x14U);
         mm3dWarpRequest->Entrance = -1;
@@ -6305,7 +6311,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
           uint32_t context = 0, game = 0, type = 0, player = 0, flags1 = 0;
           bool cutscene = false;
           bool talking = false;
-          if (memory.Read32(0x0072F5C0U, &context) && context >= 0x100000U &&
+          if (memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &context) && context >= 0x100000U &&
               memory.Read32(context + 0x16CU, &game) && game >= 0x100000U &&
               memory.Read32(game + 0x13CU, &type) && ((type >> 8U) & 0xFFU) == 4U &&
               memory.Read32(game + 0x20DCU, &player) && player >= 0x100000U &&
@@ -6859,7 +6865,7 @@ void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
           static const bool actorDump = std::getenv("TRIAEVUM_ACTOR_DUMP") != nullptr;
           auto &memory = process.Memory();
           uint32_t context = 0, game = 0, type = 0, player = 0;
-          if ((autowalk != nullptr || actorDump) && memory.Read32(0x0072F5C0U, &context) &&
+          if ((autowalk != nullptr || actorDump) && memory.Read32(Oot3dNativeGame::Mm3dData(0x0072F5C0U), &context) &&
               context >= 0x100000U && memory.Read32(context + 0x16CU, &game) && game >= 0x100000U &&
               memory.Read32(game + 0x13CU, &type) && ((type >> 8U) & 0xFFU) == 4U &&
               memory.Read32(game + 0x20DCU, &player) && player >= 0x100000U) {

@@ -12,6 +12,7 @@ bytes or data of the game.
 import hashlib
 import json
 import lzma
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -30,11 +31,15 @@ def program_fingerprint(path: Path) -> str:
 
 def main() -> int:
     work = Path(sys.argv[1])
-    recipe = HERE / "recipe"
+    # MM3D_RECIPE_DIR selects the recipe of another supported build (e.g. recipe_eshop110).
+    recipe = HERE / os.environ.get("MM3D_RECIPE_DIR", "recipe")
     recipe.mkdir(exist_ok=True)
     for name in FILES:
         shutil.copy2(work / name, recipe / name)
-    program = json.loads((work / "aot_program2.json").read_text())
+    program_file = work / "aot_program2.json"
+    if not program_file.exists():
+        program_file = work / "aot_program.json"      # a translation made by mm3d_setup.py
+    program = json.loads(program_file.read_text())
     calls = sorted({(c["site"], c["target"]) for f in program["functions"]
                     for c in f.get("direct_calls", []) if c.get("target") is not None})
     with lzma.open(recipe / "call_sites.json.xz", "wt", preset=9) as target:
