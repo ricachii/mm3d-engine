@@ -857,6 +857,8 @@ void RunAllTests() {
                 "an unlisted title must keep the OoT3D defaults");
         const auto& mm3d = Oot3dNativeGame::ResolveTitleProfile(0x0004000000125500ULL);
         Require(mm3d.MemoryFillInterruptPerUnit, "MM3D must get one MemoryFill interrupt per unit");
+        Require(!oot3d.DeferGpuCompletions && mm3d.DeferGpuCompletions,
+                "only MM3D defers GPU completions to the next VBlank (D-024)");
         Require(mm3d.SystemRegion == 1 && !mm3d.Oot3dLanguageModules,
                 "MM3D must resolve to its own profile");
         if (std::getenv("TRIAEVUM_FILL_PER_UNIT") == nullptr) {

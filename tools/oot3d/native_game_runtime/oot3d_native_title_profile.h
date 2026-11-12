@@ -16,11 +16,12 @@ struct TitleProfile {
   uint8_t SystemRegion;       // cfg:u GetRegion: 0 JPN, 1 USA, 2 EUR, 3 AUS, 4 CHN, 5 KOR, 6 TWN
   bool Oot3dLanguageModules;  // the RomFS carries OoT3D's menu/message language modules (strict detection)
   bool MemoryFillInterruptPerUnit;  // MemoryFill raises PSC0 and PSC1, one per fill unit (hardware behaviour)
+  bool DeferGpuCompletions;         // PSC/PPF/P3D/DMA reach the relay queue at the next VBlank, not inside the trigger SVC (D-024)
 };
-inline constexpr TitleProfile kDefaultTitleProfile{0, "OoT3D (default)", 2, true, false};
+inline constexpr TitleProfile kDefaultTitleProfile{0, "OoT3D (default)", 2, true, false, false};
 inline constexpr TitleProfile kTitleProfiles[] = {
-    {0x0004000000125500ULL, "MM3D USA v1.0", 1, false, true},
-    {0x0004000E00125500ULL, "MM3D USA update", 1, false, true},
+    {0x0004000000125500ULL, "MM3D USA v1.0", 1, false, true, true},
+    {0x0004000E00125500ULL, "MM3D USA update", 1, false, true, true},
 };
 
 inline uint64_t ReadProgramId(const std::filesystem::path& codeBinPath) {
@@ -54,6 +55,13 @@ inline bool MemoryFillInterruptPerUnit() {
   static const char* override = std::getenv("TRIAEVUM_FILL_PER_UNIT");
   if (override != nullptr) return std::atoi(override) != 0;
   return ActiveTitleProfile().MemoryFillInterruptPerUnit;
+}
+
+// GPU completion delivery (docs/decisiones.md D-024). TRIAEVUM_GSP_DEFER=0/1 overrides the profile (diagnostic).
+inline bool DeferGpuCompletions() {
+  static const char* override = std::getenv("TRIAEVUM_GSP_DEFER");
+  if (override != nullptr) return std::atoi(override) != 0;
+  return ActiveTitleProfile().DeferGpuCompletions;
 }
 
 } // namespace Oot3dNativeGame

@@ -3,6 +3,7 @@
 #include "oot3d_native_a32_ctr_host_internal.h"
 #include "oot3d_native_a32_second_core.h"
 #include "oot3d_native_a32_ctr_save_safety.h"
+#include "oot3d_native_title_profile.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -438,8 +439,7 @@ bool NativeA32CtrHostServices::QueueGspInterrupt(NativeA32Memory& memory,
         interruptId != static_cast<uint8_t>(Oot3dPicaInterruptId::Pdc1)) {
         std::fprintf(stderr, "GSP_INTERRUPT id=%u\n", static_cast<unsigned>(interruptId));
     }
-    static const bool deferCompletions = std::getenv("TRIAEVUM_GSP_DEFER") != nullptr;
-    if (deferCompletions && !mFlushingDeferredGsp &&
+    if (Oot3dNativeGame::DeferGpuCompletions() && !mFlushingDeferredGsp &&
         interruptId != static_cast<uint8_t>(Oot3dPicaInterruptId::Pdc0) &&
         interruptId != static_cast<uint8_t>(Oot3dPicaInterruptId::Pdc1)) {
         mDeferredGspInterrupts.push_back(interruptId);
