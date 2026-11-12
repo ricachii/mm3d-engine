@@ -1,0 +1,28 @@
+#include <winver.h>
+
+1 ICON "mm3d.ico"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "Majora's Mask 3D (PC port) launcher\0"
+      VALUE "ProductName", "Majora's Mask 3D PC port launcher\0"
+      VALUE "InternalName", "MajorasMask3D\0"
+      VALUE "OriginalFilename", "MajorasMask3D.exe\0"
+      VALUE "LegalCopyright", "GPL-3.0-or-later; built on Volpe34's mm3d-pc\0"
+      VALUE "FileVersion", "1.0.0.0\0"
+      VALUE "ProductVersion", "1.0.0.0\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 1200
+  END
+END
