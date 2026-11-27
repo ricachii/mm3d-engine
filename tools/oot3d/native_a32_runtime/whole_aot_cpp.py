@@ -3442,12 +3442,25 @@ def _render_shard_source(
     return "\n".join(lines)
 
 
-def _render_registry_source(functions: tuple[Function, ...]) -> str:
+def _render_registry_source(
+    functions: tuple[Function, ...],
+    dispatch_aliases: dict[int, int] | None = None,
+) -> str:
+    """dispatch_aliases maps an extra guest PC to the selected function entry
+    that implements it: MM3D's Thumb entries (T|1) resolve to their offline
+    A32 conversions (tools/mm3d thumb_to_a32.py). Aliases are looked up only
+    when the flat table misses; without aliases the output is unchanged."""
     function_symbols = {
         function.entry: _symbol(function.name, function.entry)
         for function in functions
     }
     entry_owners = _entry_owners(functions)
+    aliases = dict(sorted((dispatch_aliases or {}).items()))
+    for alias, target in aliases.items():
+        if alias in entry_owners:
+            raise LoweringError(f"dispatch alias 0x{alias:08X} collides with an entry")
+        if target not in function_symbols:
+            raise LoweringError(f"dispatch alias target 0x{target:08X} is not selected")
     dispatch_entries = sorted(entry_owners)
     # Flat dispatch: one slot per instruction word from the first to the last
     # entry. Every entry is an A32 instruction address, so a word index is
@@ -3459,8 +3472,9 @@ def _render_registry_source(functions: tuple[Function, ...]) -> str:
         )
     dispatch_code_base = dispatch_entries[0]
     dispatch_slot_count = ((dispatch_entries[-1] - dispatch_code_base) >> 2) + 1
+    entry_points = sorted([*dispatch_entries, *aliases])
     entries = ", ".join(
-        f"0x{entry:08X}U" for entry in dispatch_entries
+        f"0x{entry:08X}U" for entry in entry_points
     )
     lines = [
         f'#include "{HEADER_NAME}"',
@@ -3478,6 +3492,17 @@ def _render_registry_source(functions: tuple[Function, ...]) -> str:
         "",
     ]
     lines.extend(_render_function_declarations(functions))
+    for alias, target in aliases.items():
+        lines.extend(
+            [
+                "",
+                f"Oot3dWholeAotFlow ExecuteAlias_{alias:08X}(",
+                "    Oot3dWholeAotFrame& frame, Oot3dWholeAotContext& context,",
+                "    Oot3dAotArchitecturalState& state, uint32_t) {",
+                f"    return Execute_{function_symbols[target]}(frame, context, state, 0x{target:08X}U);",
+                "}",
+            ]
+        )
     lines.extend(
         [
             "",
@@ -3518,17 +3543,56 @@ def _render_registry_source(functions: tuple[Function, ...]) -> str:
             "    return true;",
             "}();",
             "",
+            *(
+                [
+                    "// Dispatch aliases (sorted): extra PCs, e.g. MM3D Thumb entries",
+                    "// (T|1), that run a selected function. Searched only on a miss.",
+                    f"constexpr std::array<DispatchEntry, {len(aliases)}> kDispatchAliases{{{{",
+                    *(
+                        f"    {{0x{alias:08X}U, ExecuteAlias_{alias:08X}}},"
+                        for alias in aliases
+                    ),
+                    "}};",
+                    "",
+                    "OOT3D_AOT_COLD const DispatchEntry* FindDispatchAlias(uint32_t pc) noexcept {",
+                    "    size_t low = 0U, high = kDispatchAliases.size();",
+                    "    while (low < high) {",
+                    "        const size_t middle = low + (high - low) / 2U;",
+                    "        if (kDispatchAliases[middle].Pc < pc) low = middle + 1U;",
+                    "        else high = middle;",
+                    "    }",
+                    "    return low < kDispatchAliases.size() && kDispatchAliases[low].Pc == pc",
+                    "        ? &kDispatchAliases[low] : nullptr;",
+                    "}",
+                    "",
+                ]
+                if aliases
+                else []
+            ),
             "// Inline into the indirect call and the dispatcher loop: out of line",
             "// it costs a call plus spills around it in ExecuteOot3dWholeAotIndirect.",
             "OOT3D_AOT_HOT const DispatchEntry* FindDispatchEntry(uint32_t pc) noexcept {",
             "    // A pc below the base wraps above the bound, and a pc that is not",
             "    // word aligned rotates its low bits to the top: both miss.",
             "    const uint32_t slot = std::rotr(pc - kDispatchCodeBase, 2);",
-            "    if (slot >= kDispatchSlotCount) {",
-            "        return nullptr;",
-            "    }",
-            "    const uint32_t index = gDispatchSlots[slot];",
-            "    return index != 0U ? &kDispatchEntries[index - 1U] : nullptr;",
+            *(
+                [
+                    "    if (slot < kDispatchSlotCount) {",
+                    "        if (const uint32_t index = gDispatchSlots[slot]; index != 0U) {",
+                    "            return &kDispatchEntries[index - 1U];",
+                    "        }",
+                    "    }",
+                    "    return FindDispatchAlias(pc);",
+                ]
+                if aliases
+                else [
+                    "    if (slot >= kDispatchSlotCount) {",
+                    "        return nullptr;",
+                    "    }",
+                    "    const uint32_t index = gDispatchSlots[slot];",
+                    "    return index != 0U ? &kDispatchEntries[index - 1U] : nullptr;",
+                ]
+            ),
             "}",
             "",
             "Oot3dWholeAotFlow ExecuteOot3dWholeAotIndirect(",
@@ -3548,7 +3612,7 @@ def _render_registry_source(functions: tuple[Function, ...]) -> str:
             "} // namespace GeneratedWholeAot",
             "",
             "namespace {",
-            f"constexpr std::array<uint32_t, {len(entry_owners)}> kEntryPoints{{{entries}}};",
+            f"constexpr std::array<uint32_t, {len(entry_points)}> kEntryPoints{{{entries}}};",
             "} // namespace",
             "",
             "std::span<const uint32_t> Oot3dWholeAotEntryPoints() noexcept {",
@@ -4227,7 +4291,9 @@ def generate(
             output, functions, external_entries, shard_count, shard_strategy,
             region_entries, memory_entries, local_state, fold_literals,
             memory_contract, program_sha256, selection_sha256, code_sha256,
-            generator_sha256, {**giant_contract, **option_contract})
+            generator_sha256, {**giant_contract, **option_contract},
+            dispatch_aliases={int(item["alias"]): int(item["target"])
+                              for item in selection.get("dispatch_aliases", [])})
     finally:
         _LITERAL_IMAGE = None
         _NATIVE_VFP_AARCH64 = False
@@ -4256,6 +4322,7 @@ def _generate_files(
     code_sha256: str,
     generator_sha256: str,
     giant_contract: dict[str, object] | None = None,
+    dispatch_aliases: dict[int, int] | None = None,
 ) -> dict[str, object]:
     if region_entries - {function.entry for function in functions}:
         raise ValueError("callback-free regions must be selected function entries")
@@ -4265,6 +4332,10 @@ def _generate_files(
     generated_files: dict[str, bytes] = {HEADER_NAME: header}
     shard_records: list[dict[str, object]] = []
     if shard_count == 1:
+        if dispatch_aliases:
+            raise LoweringError(
+                "dispatch aliases need the sharded registry (shard_count > 1)"
+            )
         generated_files[SOURCE_NAME] = _render_source(
             functions, external_entries, region_entries, memory_entries,
             local_state,
@@ -4329,9 +4400,10 @@ def _generate_files(
                     ),
                 }
             )
-        generated_files[SOURCE_NAME] = _render_registry_source(functions).encode(
-            "utf-8"
-        )
+        generated_files[SOURCE_NAME] = _render_registry_source(
+            functions,
+            dispatch_aliases,
+        ).encode("utf-8")
     if memory_entries:
         for name, data in generated_files.items():
             if b'#include "oot3d_native_a32_memory_region.h"' in data:

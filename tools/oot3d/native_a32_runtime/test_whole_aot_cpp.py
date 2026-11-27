@@ -1318,6 +1318,111 @@ class WholeAotCppTests(unittest.TestCase):
             )
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
+    def _alias_inputs(self, root: Path, aliases: list[dict[str, int]] | None):
+        entries = [0x1000, 0x1008]
+        code = words(0xE12FFF1E, 0, 0xE12FFF1E)
+        code_path = root / "code.bin"
+        program_path = root / "program.json"
+        selection_path = root / "selection.json"
+        code_path.write_bytes(code)
+        program_path.write_text(json.dumps({
+            "format": PROGRAM_FORMAT, "base": 0x1000,
+            "code_sha256": hashlib.sha256(code).hexdigest(),
+            "blocks": [{"id": i, "pc": e, "end_pc": e + 4,
+                        "successors": [{"site": e, "kind": "return"}]}
+                       for i, e in enumerate(entries)],
+            "functions": [{"entry": e, "name": f"Leaf{i}", "blocks": [i],
+                           "closed_static_cfg": True, "direct_calls": [],
+                           "tail_calls": [], "indirect_sites": []}
+                          for i, e in enumerate(entries)],
+        }), encoding="utf-8")
+        selection = {"format": SELECTION_FORMAT,
+                     "functions": [{"entry": e} for e in entries]}
+        if aliases is not None:
+            selection["dispatch_aliases"] = aliases
+        selection_path.write_text(json.dumps(selection), encoding="utf-8")
+        return program_path, selection_path, code_path
+
+    def test_dispatch_aliases_resolve_thumb_entries_to_their_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = self._alias_inputs(root, [{"alias": 0x2001, "target": 0x1008},
+                                               {"alias": 0x0FFF, "target": 0x1000}])
+            generate(*inputs, root / "out", shard_count=2)
+            registry = (root / "out" / SOURCE_NAME).read_text(encoding="utf-8")
+            self.assertIn("ExecuteAlias_00002001(", registry)
+            self.assertIn("return Execute_Leaf1_00001008(frame, context, state, 0x00001008U);",
+                          registry)
+            self.assertIn("{0x00000FFFU, ExecuteAlias_00000FFF},", registry)
+            self.assertIn("return FindDispatchAlias(pc);", registry)
+            self.assertIn("kEntryPoints{0x00000FFFU, 0x00001000U, 0x00001008U, 0x00002001U}",
+                          registry)
+            compiler = os.environ.get("CXX") or shutil.which("g++") or shutil.which("clang++")
+            if not compiler:
+                return
+            begin = registry.index("using Function = ")
+            end = registry.index("Oot3dWholeAotFlow ExecuteOot3dWholeAotIndirect(", begin)
+            thunks = registry[registry.index("Oot3dWholeAotFlow ExecuteAlias_"):begin]
+            program = (
+                "#include <array>\n#include <bit>\n#include <cstddef>\n#include <cstdint>\n"
+                "#define OOT3D_AOT_HOT inline\n#define OOT3D_AOT_COLD\n"
+                "struct Oot3dWholeAotFlow { uint32_t Pc; }; struct Oot3dWholeAotFrame {};\n"
+                "struct Oot3dWholeAotContext {}; struct Oot3dAotArchitecturalState {};\n"
+                "Oot3dWholeAotFlow Execute_Leaf0_00001000(Oot3dWholeAotFrame&, Oot3dWholeAotContext&,"
+                " Oot3dAotArchitecturalState&, uint32_t pc) { return {pc}; }\n"
+                "Oot3dWholeAotFlow Execute_Leaf1_00001008(Oot3dWholeAotFrame&, Oot3dWholeAotContext&,"
+                " Oot3dAotArchitecturalState&, uint32_t pc) { return {pc}; }\n"
+                f"{thunks}\n{registry[begin:end]}\n"
+                "int main() {\n"
+                "    Oot3dWholeAotFrame f; Oot3dWholeAotContext c; Oot3dAotArchitecturalState s;\n"
+                "    const struct { uint32_t pc, target; } cases[] = {\n"
+                "        {0x1000U, 0x1000U}, {0x1008U, 0x1008U}, {0x2001U, 0x1008U},\n"
+                "        {0x0FFFU, 0x1000U}, {0x1001U, 0U}, {0x2000U, 0U}, {0x1004U, 0U},\n"
+                "        {0xFFFFFFFFU, 0U}, {0U, 0U}};\n"
+                "    for (const auto& item : cases) {\n"
+                "        const DispatchEntry* e = FindDispatchEntry(item.pc);\n"
+                "        if ((e != nullptr) != (item.target != 0U)) return 1;\n"
+                "        if (e != nullptr && e->Execute(f, c, s, item.pc).Pc != item.target) return 2;\n"
+                "    }\n"
+                "    return 0;\n"
+                "}\n"
+            )
+            source = root / "alias.cpp"
+            source.write_text(program, encoding="utf-8")
+            executable = root / "alias"
+            subprocess.run([compiler, "-std=c++20", "-O2", str(source), "-o", str(executable)],
+                           check=True, capture_output=True, timeout=120)
+            run = subprocess.run([str(executable)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+    def test_dispatch_alias_colliding_with_an_entry_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = self._alias_inputs(root, [{"alias": 0x1008, "target": 0x1000}])
+            with self.assertRaisesRegex(Exception, "collides with an entry"):
+                generate(*inputs, root / "out", shard_count=2)
+            inputs = self._alias_inputs(root, [{"alias": 0x3001, "target": 0x1004}])
+            with self.assertRaisesRegex(Exception, "is not selected"):
+                generate(*inputs, root / "out2", shard_count=2)
+
+    def test_single_file_registry_rejects_dispatch_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = self._alias_inputs(root, [{"alias": 0x2001, "target": 0x1008}])
+            with self.assertRaisesRegex(Exception, "sharded registry"):
+                generate(*inputs, root / "out", shard_count=1)
+
+    def test_registry_without_aliases_is_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            generate(*self._alias_inputs(root, None), root / "a", shard_count=2)
+            generate(*self._alias_inputs(root, []), root / "b", shard_count=2)
+            a = (root / "a" / SOURCE_NAME).read_text(encoding="utf-8")
+            b = (root / "b" / SOURCE_NAME).read_text(encoding="utf-8")
+            self.assertEqual(a, b)
+            self.assertNotIn("FindDispatchAlias", a)
+            self.assertNotIn("ExecuteAlias_", a)
+
     def test_computed_add_pc_call_uses_existing_link_register(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
