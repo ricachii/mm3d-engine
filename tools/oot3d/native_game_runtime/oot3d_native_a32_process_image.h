@@ -42,6 +42,13 @@ struct NativeA32ProcessImageManifest {
     uint64_t RomFsImageFileSize = 0;
     uint64_t RomFsImageOffset = 0;
     uint64_t RomFsImageSize = 0;
+    // Optional (source.update_romfs_*): the RomFS of the installed update,
+    // which FS:OpenFileDirectly serves for NCCH file path type 5
+    // (UpdateRomFS). MM3D's eShop v1.1.0 code opens it; empty when absent.
+    std::filesystem::path UpdateRomFsImagePath;
+    uint64_t UpdateRomFsImageFileSize = 0;
+    uint64_t UpdateRomFsImageOffset = 0;
+    uint64_t UpdateRomFsImageSize = 0;
     std::string ProcessName;
     uint32_t EntryAddress = 0;
     uint32_t PageSize = 0;

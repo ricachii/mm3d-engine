@@ -117,6 +117,30 @@ ParseNativeA32ProcessImageManifest(const Json& document,
         result.RomFsImageOffset =
             source.at("romfs_service_offset").get<uint64_t>();
         result.RomFsImageSize = source.at("romfs_service_size").get<uint64_t>();
+        if (source.contains("update_romfs_image_path")) {
+            result.UpdateRomFsImagePath = ResolvePackagedInputPath(
+                result.ManifestPath,
+                source.at("update_romfs_image_path").get<std::string>());
+            result.UpdateRomFsImageFileSize =
+                source.at("update_romfs_image_file_size").get<uint64_t>();
+            result.UpdateRomFsImageOffset =
+                source.at("update_romfs_service_offset").get<uint64_t>();
+            result.UpdateRomFsImageSize =
+                source.at("update_romfs_service_size").get<uint64_t>();
+            if (result.UpdateRomFsImageSize == 0 ||
+                result.UpdateRomFsImageOffset > result.UpdateRomFsImageFileSize ||
+                result.UpdateRomFsImageSize >
+                    result.UpdateRomFsImageFileSize - result.UpdateRomFsImageOffset) {
+                throw std::runtime_error("invalid update RomFS service window");
+            }
+            if (validateHostFiles &&
+                (!std::filesystem::is_regular_file(result.UpdateRomFsImagePath) ||
+                 std::filesystem::file_size(result.UpdateRomFsImagePath) !=
+                     result.UpdateRomFsImageFileSize)) {
+                throw std::runtime_error(
+                    "native process update RomFS image is missing or has changed size");
+            }
+        }
         result.ProcessName = process.at("name").get<std::string>();
         result.EntryAddress = ReadU32(process, "entrypoint");
         result.PageSize = ReadU32(process, "page_size");

@@ -761,6 +761,19 @@ void RunAllTests() {
         0x49, 0x56, 0x46, 0x43, 0x00, 0x01, 0x02, 0x03,
         0x10, 0x11, 0x12, 0x13, 0x20, 0x21, 0x22, 0x23,
     };
+    // The installed update's RomFS (NCCH file path type 5, MM3D eShop v1.1.0).
+    const std::filesystem::path updateRomFsPath =
+        std::filesystem::temp_directory_path() /
+        "oot3d_native_a32_ctr_host_test_update.romfs";
+    constexpr std::array<uint8_t, 8> updateRomFsBytes{
+        0x55, 0x50, 0x44, 0x41, 0x54, 0x45, 0x0A, 0x0B,
+    };
+    {
+        std::ofstream output(updateRomFsPath, std::ios::binary | std::ios::trunc);
+        output.write(reinterpret_cast<const char*>(updateRomFsBytes.data()),
+                     static_cast<std::streamsize>(updateRomFsBytes.size()));
+        Require(output.good(), "cannot write temporary update RomFS image");
+    }
     {
         std::ofstream output(romFsPath, std::ios::binary | std::ios::trunc);
         Require(output.good(), "cannot create temporary RomFS image");
@@ -778,6 +791,9 @@ void RunAllTests() {
     config.RomFsImagePath = romFsPath;
     config.RomFsImageOffset = 4;
     config.RomFsImageSize = romFsBytes.size() - config.RomFsImageOffset;
+    config.UpdateRomFsImagePath = updateRomFsPath;
+    config.UpdateRomFsImageOffset = 2;
+    config.UpdateRomFsImageSize = updateRomFsBytes.size() - 2U;
     config.PicaFrontend = &picaFrontend;
     config.SaveDataDirectory = saveDataPath;
     config.ProfileRuntime = true;
@@ -1355,6 +1371,61 @@ void RunAllTests() {
                 memory.Read32(0x1FF82080, &response) &&
                 response == 0x08080040,
             "File:Close response is wrong");
+
+    // Path type 5 opens the update's RomFS, from its own image and window.
+    Require(memory.Fill(0x1FF82140, 1, 0) &&
+                memory.Fill(0x1FF82150, 12, 0) &&
+                memory.Write32(0x1FF82150, 5) &&
+                memory.Write32(0x1FF82080, 0x08030204) &&
+                memory.Write32(0x1FF82084, 0) &&
+                memory.Write32(0x1FF82088, 3) &&
+                memory.Write32(0x1FF8208C, 1) &&
+                memory.Write32(0x1FF82090, 1) &&
+                memory.Write32(0x1FF82094, 2) &&
+                memory.Write32(0x1FF82098, 12) &&
+                memory.Write32(0x1FF8209C, 1) &&
+                memory.Write32(0x1FF820A0, 0) &&
+                memory.Write32(0x1FF820A4, 0x4802) &&
+                memory.Write32(0x1FF820A8, 0x1FF82140) &&
+                memory.Write32(0x1FF820AC, 0x30002) &&
+                memory.Write32(0x1FF820B0, 0x1FF82150),
+            "cannot write the update RomFS FS:OpenFileDirectly request");
+    state.r[0] = fsSession;
+    uint32_t updateRomFsFile = 0;
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                    NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF82080, &response) &&
+                response == 0x08030042 &&
+                memory.Read32(0x1FF82084, &response) && response == 0 &&
+                memory.Read32(0x1FF8208C, &updateRomFsFile) &&
+                updateRomFsFile != 0 && updateRomFsFile != romFsFile,
+            "FS:OpenFileDirectly did not open the update RomFS (path type 5)");
+    constexpr uint32_t updateReadSize = 4;
+    Require(memory.Fill(readAddress, updateReadSize, 0xFF) &&
+                memory.Write32(0x1FF82080, 0x080200C2) &&
+                memory.Write64(0x1FF82084, 1, &faultAddress) &&
+                memory.Write32(0x1FF8208C, updateReadSize) &&
+                memory.Write32(0x1FF82090, (updateReadSize << 4U) | 0xCU) &&
+                memory.Write32(0x1FF82094, readAddress),
+            "cannot write the update RomFS File:Read request");
+    state.r[0] = updateRomFsFile;
+    std::array<uint8_t, updateReadSize> updateReadBytes{};
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                    NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF82088, &response) &&
+                response == updateReadSize &&
+                memory.ReadBytes(readAddress, updateReadBytes) &&
+                std::equal(updateReadBytes.begin(), updateReadBytes.end(),
+                           updateRomFsBytes.begin() + 2 + 1),
+            "File:Read of the update RomFS did not read its own window");
+    Require(memory.Write32(0x1FF82080, 0x08080000),
+            "cannot write the update RomFS File:Close request");
+    state.r[0] = updateRomFsFile;
+    Require(host.HandleSvc(0x32, state, memory, context).Action ==
+                    NativeA32HostAction::Resume &&
+                memory.Read32(0x1FF82080, &response) &&
+                response == 0x08080040,
+            "File:Close of the update RomFS is wrong");
 
     constexpr uint32_t appletAttributes = 0x300U;
     Require(memory.Write32(0x1FF82080, 0x00010040) &&
@@ -2452,18 +2523,25 @@ void RunAllTests() {
     Require(foundRomFsObject &&
                 host.RestoreState(crossPlatformHostState, process, &error),
             "CTR host state did not safely rebind a foreign RomFS path");
-    bool reboundRomFsObject = false;
+    // Every RomFS object is bound to its own configured image: the base
+    // RomFS, or the update RomFS (path type 5) for an object marked as such.
+    bool reboundRomFsObject = true;
+    bool reboundUpdateRomFsObject = false;
     const auto reboundHostState = host.CaptureState();
     for (const auto& object : reboundHostState["kernel_objects"]) {
         if (object.at("type").get<std::string>() ==
             "client_session:file:romfs") {
-            reboundRomFsObject =
+            const bool update = object.value("update_romfs", false);
+            reboundUpdateRomFsObject |= update;
+            reboundRomFsObject &=
                 object.at("file_path").get<std::string>() ==
-                romFsPath.string();
+                (update ? updateRomFsPath : romFsPath).string();
         }
     }
     Require(reboundRomFsObject,
             "restored RomFS object retained its foreign host path");
+    Require(reboundUpdateRomFsObject,
+            "restored update RomFS object lost its update binding");
 
     auto incompatibleHostState = host.CaptureState();
     bool foundSaveDataObject = false;
@@ -2498,6 +2576,7 @@ void RunAllTests() {
 
     std::error_code removeError;
     std::filesystem::remove(romFsPath, removeError);
+    std::filesystem::remove(updateRomFsPath, removeError);
     std::filesystem::remove_all(saveDataPath, removeError);
     std::filesystem::remove_all(saveDataPath.string() + "-backups", removeError);
 

@@ -205,7 +205,8 @@ def ctr_system_regions(exheader: bytes) -> list[dict[str, object]]:
 
 
 def build_manifest(
-    exheader_path: Path, code_path: Path, romfs_image_path: Path
+    exheader_path: Path, code_path: Path, romfs_image_path: Path,
+    update_romfs_image_path: Path | None = None,
 ) -> dict[str, object]:
     exheader = exheader_path.read_bytes()
     code = code_path.read_bytes()
@@ -219,6 +220,23 @@ def build_manifest(
     romfs_service_offset, romfs_service_size = romfs_service_window(
         romfs_image_path, romfs_image_size
     )
+    # The installed update's RomFS, opened with NCCH file path type 5
+    # (UpdateRomFS) by MM3D's eShop v1.1.0 code (mm3d-pc's setup writes the
+    # same fields).
+    update_romfs: dict[str, object] = {}
+    if update_romfs_image_path is not None:
+        if not update_romfs_image_path.is_file():
+            raise ValueError(f"update RomFS image does not exist: {update_romfs_image_path}")
+        update_size = update_romfs_image_path.stat().st_size
+        update_offset, update_service = romfs_service_window(
+            update_romfs_image_path, update_size
+        )
+        update_romfs = {
+            "update_romfs_image_path": str(update_romfs_image_path.resolve()),
+            "update_romfs_image_file_size": update_size,
+            "update_romfs_service_offset": update_offset,
+            "update_romfs_service_size": update_service,
+        }
 
     text = segment(exheader, 0x10)
     ro = segment(exheader, 0x20)
@@ -311,6 +329,7 @@ def build_manifest(
             "romfs_image_file_size": romfs_image_size,
             "romfs_service_offset": romfs_service_offset,
             "romfs_service_size": romfs_service_size,
+            **update_romfs,
             "layout_authority": "CTR ExHeader; page/BSS/stack/TLS semantics verified against Azahar NCCH loader",
         },
         "process": {
@@ -366,10 +385,16 @@ def main() -> int:
         type=Path,
         default=REPO_ROOT / "build-codex/oot3d_native_process_manifest.json",
     )
+    parser.add_argument(
+        "--update-romfs-image", type=Path,
+        help="RomFS of the installed update (NCCH file path type 5); optional",
+    )
     parser.add_argument("--expected-code-sha256")
     args = parser.parse_args()
 
-    manifest = build_manifest(args.exheader, args.code_bin, args.romfs_image)
+    manifest = build_manifest(
+        args.exheader, args.code_bin, args.romfs_image, args.update_romfs_image
+    )
     actual_hash = manifest["source"]["code_bin_sha256"]
     if args.expected_code_sha256 and actual_hash.lower() != args.expected_code_sha256.lower():
         raise SystemExit(

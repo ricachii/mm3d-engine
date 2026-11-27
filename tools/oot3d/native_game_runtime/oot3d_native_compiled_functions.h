@@ -54,6 +54,11 @@ bool Oot3dWholeAotAvailable() noexcept;
 // (Oot3dWholeAotHookGatesError in oot3d_native_whole_aot_runtime.h).
 Oot3dWholeAotHookGateSet Oot3dLinkedWholeAotHookGates() noexcept;
 
+// OoT3D game semantics (manual compiled functions, typed gameplay): on by default; off for another title
+// (TitleProfile::Oot3dGameSemantics), whose code and data sit at other addresses.
+void SetOot3dGameSemanticsEnabled(bool enabled) noexcept;
+bool Oot3dGameSemanticsEnabled() noexcept;
+
 // Native overrides of guest functions (oot3d_native_guest_overrides).
 // No effect when the build doesn't compile them (precompiled whole-AOT module).
 void SetOot3dGuestOverridesActive(bool enabled) noexcept;

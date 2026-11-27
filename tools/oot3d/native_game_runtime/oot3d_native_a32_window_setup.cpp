@@ -1,4 +1,5 @@
 // Native A32 window session: setup (process image, host services, renderer, UI, initial state).
+#include "mm3d_build.h"
 #include "fast/oot3d/gl_widescreen_menu_policy.h"
 #include "oot3d_native_a32_window_session.h"
 #include "oot3d_native_title_profile.h"
@@ -257,6 +258,16 @@ void NativeA32WindowSession::Setup() {
   hostConfig.SystemLanguage = languageSettings->SystemId();
   hostConfig.SystemRegion = titleProfile.SystemRegion;
   Oot3dNativeGame::SetActiveTitleProfile(titleProfile);
+  // Another title (MM3D) runs without the OoT3D ports, hooks and UI, which are
+  // keyed by OoT3D code and data addresses (TitleProfile::Oot3dGameSemantics).
+  Oot3dNativeGame::SetOot3dGameSemanticsEnabled(titleProfile.Oot3dGameSemantics);
+  if (!titleProfile.Oot3dGameSemantics) {
+    const Oot3dNativeGame::Mm3dBuild *mm3dBuild =
+        Oot3dNativeGame::SelectMm3dBuildForCode(manifest->CodeBinSha256);
+    std::fprintf(stderr, "title build: %s\n",
+                 mm3dBuild != nullptr ? mm3dBuild->Name
+                                      : "unknown (no host addresses for this code)");
+  }
   // Diagnostic (opt-in): TRIAEVUM_SYSTEM_REGION=<n> overrides the region cfg:u reports (0 JPN, 1 USA, 2 EUR ...).
   if (const char* region = std::getenv("TRIAEVUM_SYSTEM_REGION")) {
     hostConfig.SystemRegion = static_cast<uint8_t>(std::atoi(region));
@@ -270,6 +281,9 @@ void NativeA32WindowSession::Setup() {
   hostConfig.RomFsImagePath = manifest->RomFsImagePath;
   hostConfig.RomFsImageOffset = manifest->RomFsImageOffset;
   hostConfig.RomFsImageSize = manifest->RomFsImageSize;
+  hostConfig.UpdateRomFsImagePath = manifest->UpdateRomFsImagePath;
+  hostConfig.UpdateRomFsImageOffset = manifest->UpdateRomFsImageOffset;
+  hostConfig.UpdateRomFsImageSize = manifest->UpdateRomFsImageSize;
   hostConfig.PicaFrontend = &picaFrontend;
   hostConfig.PicaCompositionDomain = &picaCompositionDomain;
   hostConfig.PicaRefreshCompositionDomain = &picaRefreshCompositionDomain;
@@ -379,6 +393,9 @@ void NativeA32WindowSession::Setup() {
           std::string_view(overrides) != "0");
     }
 #endif
+    // The native overrides replace OoT3D functions by address.
+    if (!Oot3dNativeGame::Oot3dGameSemanticsEnabled())
+      Oot3dNativeGame::SetOot3dGuestOverridesActive(false);
     // Spike profile (config/guest_spike_ms; off by default): turns the
     // profile on for every frame even without config/guest_profile (then without the
     // periodic report) and writes logs/guest_spikes.txt and
@@ -492,6 +509,14 @@ void NativeA32WindowSession::Setup() {
 #endif
   blockEntryHooks =
       Oot3dNativeGame::Oot3dNativeBlockEntryHookPcs(blockEntryHookOptions);
+  if (!Oot3dNativeGame::Oot3dGameSemanticsEnabled()) {
+    // Every OoT3D hook names an OoT3D code address. MM3D's own hooks
+    // (mm3d_build.h) drive mm3d-pc's renderer features and are not installed
+    // yet (docs D-027).
+    blockEntryHooks.clear();
+    picaCompositionHooks = {};
+    typedGameplayObservableExitHooks = {};
+  }
 #if defined(__SWITCH__)
   gSwitchBlockHookCount = blockEntryHooks.size();
   gSwitchBlockHooksSorted =
@@ -537,10 +562,12 @@ void NativeA32WindowSession::Setup() {
       enableCompiledFunctions && !launch.DisableTrueAotBlocks;
 #endif
 #if defined(OOT3D_WHOLE_AOT_PRODUCT_MODE)
-  enableManualCompiledFunctions = true;
+  enableManualCompiledFunctions =
+      Oot3dNativeGame::Oot3dGameSemanticsEnabled();
 #else
   enableManualCompiledFunctions =
-      !launch.DisableManualCompiledFunctions;
+      !launch.DisableManualCompiledFunctions &&
+      Oot3dNativeGame::Oot3dGameSemanticsEnabled();
 #endif
   trueAotEntries = Oot3dNativeGame::Oot3dTrueAotBlockEntryPoints();
   compiledFunctionEntries =
@@ -573,8 +600,9 @@ void NativeA32WindowSession::Setup() {
     Oot3dNativeGame::ResetOot3dTrueAotBlockStats();
   }
 #if !defined(OOT3D_WHOLE_AOT_PRODUCT_MODE)
-  wholeAotObservableExitBlocks.push_back(
-      Oot3dNativeGame::kOot3dMeshCommandPacketSubmitEntry);
+  if (Oot3dNativeGame::Oot3dGameSemanticsEnabled())
+    wholeAotObservableExitBlocks.push_back(
+        Oot3dNativeGame::kOot3dMeshCommandPacketSubmitEntry);
   wholeAotObservableExitBlocks.insert(
       wholeAotObservableExitBlocks.end(), picaCompositionHooks.begin(),
       picaCompositionHooks.end());

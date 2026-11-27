@@ -30,6 +30,19 @@
 #include <vector>
 
 namespace Oot3dNativeGame {
+
+namespace {
+bool gOot3dGameSemanticsEnabled = true;
+}
+
+void SetOot3dGameSemanticsEnabled(bool enabled) noexcept {
+    gOot3dGameSemanticsEnabled = enabled;
+}
+
+bool Oot3dGameSemanticsEnabled() noexcept {
+    return gOot3dGameSemanticsEnabled;
+}
+
 namespace {
 
 constexpr uint32_t kPicaCommandWriterWriteRegisterRange = 0x00307BD8U;
@@ -953,6 +966,9 @@ bool ExecuteOot3dManualCompiledFunction(
     oot3d::recomp::a32::GuestState& state,
     NativeA32Memory& memory,
     oot3d::recomp::a32::ExecutionResult* result) {
+    if (!gOot3dGameSemanticsEnabled) {
+        return false;
+    }
     switch (pc) {
     case kPicaCommandWriterWriteRegisterRange:
         return ExecutePicaCommandWriterWriteRegisterRange(state, memory, result);

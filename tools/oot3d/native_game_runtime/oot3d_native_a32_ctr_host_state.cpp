@@ -116,6 +116,8 @@ nlohmann::json NativeA32CtrHostServices::CaptureState() const {
                                    ? nlohmann::json(*object.MappedAddress)
                                    : nlohmann::json(nullptr)},
         });
+        // Only present when set, so states without an update RomFS keep their bytes.
+        if (object.UpdateRomFs) encodedObject["update_romfs"] = true;
         if (mConfig.Filesystem == nullptr && object.Type == "client_session:file:savedata") {
             if (const auto portable = PortableCtrSavePath(mConfig.SaveDataDirectory, object.FilePath)) {
                 encodedObject["file_path"] = portable->second;
@@ -335,6 +337,9 @@ bool NativeA32CtrHostServices::RestoreState(const nlohmann::json& state,
             return (!mConfig.RomFsImagePath.empty() &&
                     normalizedAbsolute(path) ==
                         normalizedAbsolute(mConfig.RomFsImagePath)) ||
+                   (!mConfig.UpdateRomFsImagePath.empty() &&
+                    normalizedAbsolute(path) ==
+                        normalizedAbsolute(mConfig.UpdateRomFsImagePath)) ||
                    pathIsWithin(mConfig.SaveDataDirectory, path) ||
                    (!mConfig.SaveDataDirectory.empty() &&
                     pathIsWithin(CtrExtDataBaseDirectory(mConfig.SaveDataDirectory), path));
@@ -376,7 +381,15 @@ bool NativeA32CtrHostServices::RestoreState(const nlohmann::json& state,
                 object->Type == "client_session:file:romfs";
             const bool isSaveFile =
                 object->Type == "client_session:file:savedata";
-            if (isRomFsFile) {
+            object->UpdateRomFs = isRomFsFile && encoded.value("update_romfs", false);
+            if (object->UpdateRomFs) {
+                if (mConfig.Filesystem != nullptr ||
+                    mConfig.UpdateRomFsImagePath.empty()) {
+                    throw std::runtime_error(
+                        "update RomFS kernel object has no configured image");
+                }
+                object->FilePath = mConfig.UpdateRomFsImagePath;
+            } else if (isRomFsFile) {
                 if (mConfig.Filesystem == nullptr &&
                     mConfig.RomFsImagePath.empty()) {
                     throw std::runtime_error(
@@ -401,8 +414,12 @@ bool NativeA32CtrHostServices::RestoreState(const nlohmann::json& state,
             object->FileOpenMode = encoded.at("file_open_mode").get<uint32_t>();
             object->FileClosed = encoded.value("file_closed", false);
             object->SaveJournalWriter = encoded.value("save_journal_writer", uint64_t{0});
-            if (isRomFsFile && (object->FileOffset != mConfig.RomFsImageOffset ||
-                                object->FileSize != mConfig.RomFsImageSize)) {
+            const uint64_t romFsOffset = object->UpdateRomFs ? mConfig.UpdateRomFsImageOffset
+                                                             : mConfig.RomFsImageOffset;
+            const uint64_t romFsSize = object->UpdateRomFs ? mConfig.UpdateRomFsImageSize
+                                                           : mConfig.RomFsImageSize;
+            if (isRomFsFile && (object->FileOffset != romFsOffset ||
+                                object->FileSize != romFsSize)) {
                 throw std::runtime_error("restored RomFS service view is incompatible");
             }
             if (!object->FileClosed && mConfig.Filesystem != nullptr && (isRomFsFile || isSaveFile)) {

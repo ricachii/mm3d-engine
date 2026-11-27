@@ -17,11 +17,16 @@ struct TitleProfile {
   bool Oot3dLanguageModules;  // the RomFS carries OoT3D's menu/message language modules (strict detection)
   bool MemoryFillInterruptPerUnit;  // MemoryFill raises PSC0 and PSC1, one per fill unit (hardware behaviour)
   bool DeferGpuCompletions;         // PSC/PPF/P3D/DMA reach the relay queue at the next VBlank, not inside the trigger SVC (D-024)
+  // The host's OoT3D ports, hooks and UI (manual compiled functions, typed gameplay, guest overrides, block-entry
+  // hooks, TopScreen UI) are keyed by OoT3D code and data addresses: another title runs without them.
+  bool Oot3dGameSemantics;
 };
-inline constexpr TitleProfile kDefaultTitleProfile{0, "OoT3D (default)", 2, true, false, false};
+inline constexpr TitleProfile kDefaultTitleProfile{0, "OoT3D (default)", 2, true, false, false, true};
+// The MM3D program id is the same for the v1.0 base and its updates: the build of the game code (mm3d_build.h) is
+// chosen by the code.bin SHA-256 instead (SelectMm3dBuildForCode).
 inline constexpr TitleProfile kTitleProfiles[] = {
-    {0x0004000000125500ULL, "MM3D USA v1.0", 1, false, true, true},
-    {0x0004000E00125500ULL, "MM3D USA update", 1, false, true, true},
+    {0x0004000000125500ULL, "MM3D USA", 1, false, true, true, false},
+    {0x0004000E00125500ULL, "MM3D USA update", 1, false, true, true, false},
 };
 
 inline uint64_t ReadProgramId(const std::filesystem::path& codeBinPath) {

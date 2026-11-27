@@ -60,6 +60,16 @@ inline const Mm3dBuild& SelectMm3dBuild(std::string_view variant) {
   return *build;
 }
 
+// The build whose code.bin has this SHA-256 (lowercase hex, the process manifest's source.code_bin_sha256), made
+// active; nullptr (and the active build unchanged) for code the host has no addresses for, e.g. the v1.0 base.
+inline const Mm3dBuild* SelectMm3dBuildForCode(std::string_view codeSha256) {
+  const Mm3dBuild* build = nullptr;
+  if (codeSha256 == "6eec27b1827eab2c87744ac38066d569ffe6fe75790b1eb3300bd91f5099038d") build = &kMm3dBuildUsaV11;
+  if (codeSha256 == "a1d1724df4857a68df200d2543ab6c96df172738fe511f58168b77c58fe36e05") build = &kMm3dBuildEshop110;
+  if (build != nullptr) ActiveMm3dBuildSlot() = build;
+  return build;
+}
+
 // A global of the game (rodata, data or .bss) at its v1.1 address -> the address in the active build.
 inline uint32_t Mm3dData(uint32_t v11Address) { return v11Address + ActiveMm3dBuild().DataShift; }
 

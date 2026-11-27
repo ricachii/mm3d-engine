@@ -11,6 +11,7 @@
 namespace Oot3dNativeGame {
 
 namespace {
+constexpr uint32_t kNcchPathUpdateRomFs = 5U;  // NCCHFilePathType::UpdateRomFS
 
 // Default gamecoin.dat of shared extdata 0xF000000B, as the PTM of the
 // Azahar (default_game_coin): magic 0x4F00, 42 Play Coins, 0 moedas no dia,
@@ -479,27 +480,46 @@ NativeA32HostResult NativeA32CtrHostServices::HandleFsRequest(
                 memory.Read32(words[11], &pathType) &&
                 memory.Read32(words[11] + 4U, &pathReserved0) &&
                 memory.Read32(words[11] + 8U, &pathReserved1) &&
-                pathType == 0U && pathReserved0 == 0U &&
-                pathReserved1 == 0U;
-            const bool opensRomFs = requestsRomFs &&
+                (pathType == 0U || pathType == kNcchPathUpdateRomFs) &&
+                pathReserved0 == 0U && pathReserved1 == 0U;
+            // Path type 5 is the RomFS of the installed update
+            // (NCCHFilePathType::UpdateRomFS in Citra/Azahar), served from its
+            // own image (manifest source.update_romfs_*); MM3D's eShop v1.1.0
+            // code opens it. Port of mm3d-pc (GPL-3.0-or-later, Volpe34).
+            const bool requestsUpdateRomFs =
+                requestsRomFs && pathType == kNcchPathUpdateRomFs;
+            const bool opensRomFs = requestsRomFs && !requestsUpdateRomFs &&
                                     mConfig.RomFsImageSize != 0U &&
                                     (mConfig.Filesystem != nullptr ||
                                      !mConfig.RomFsImagePath.empty());
+            const bool opensUpdateRomFs =
+                requestsUpdateRomFs && mConfig.UpdateRomFsImageSize != 0U &&
+                !mConfig.UpdateRomFsImagePath.empty();
             if (!requestsRomFs) {
                 return FailFsRequest(state, memory, commandBuffer, sessionType, event,
                                      kFsInvalidPath, "unsupported-romfs-path");
             }
-            if (!opensRomFs) {
+            if (!opensRomFs && !opensUpdateRomFs) {
                 return FailFsRequest(state, memory, commandBuffer, sessionType, event,
-                                     0xC8804464U, "romfs-unavailable");
+                                     0xC8804464U,
+                                     requestsUpdateRomFs ? "update-romfs-unavailable"
+                                                         : "romfs-unavailable");
             }
-            if (opensRomFs) {
+            {
                 auto file = std::make_shared<KernelObject>();
                 file->Type = "client_session:file:romfs";
-                file->FileOffset = mConfig.RomFsImageOffset;
-                file->FileSize = mConfig.RomFsImageSize;
+                file->FileOffset = opensUpdateRomFs ? mConfig.UpdateRomFsImageOffset
+                                                    : mConfig.RomFsImageOffset;
+                file->FileSize = opensUpdateRomFs ? mConfig.UpdateRomFsImageSize
+                                                  : mConfig.RomFsImageSize;
                 bool opened = false;
-                if (mConfig.Filesystem != nullptr) {
+                if (opensUpdateRomFs) {
+                    file->UpdateRomFs = true;
+                    file->FilePath = mConfig.UpdateRomFsImagePath;
+                    file->RomFsBacking =
+                        std::make_shared<RomFsBackingFile>(file->FilePath);
+                    opened = true;
+                } else if (mConfig.Filesystem != nullptr) {
                     file->FilePath = mConfig.RomFsContentPath;
                     opened =
                         mConfig.Filesystem->Open(

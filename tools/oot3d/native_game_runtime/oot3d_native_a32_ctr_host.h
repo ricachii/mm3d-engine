@@ -241,6 +241,10 @@ struct NativeA32CtrHostConfig {
     std::filesystem::path RomFsImagePath;
     uint64_t RomFsImageOffset = 0;
     uint64_t RomFsImageSize = 0;
+    // The installed update's RomFS (NCCH file path type 5); empty: none.
+    std::filesystem::path UpdateRomFsImagePath;
+    uint64_t UpdateRomFsImageOffset = 0;
+    uint64_t UpdateRomFsImageSize = 0;
     NativeA32CtrFilesystem* Filesystem = nullptr;
     std::string RomFsContentPath = "inputs/romfs";
     Oot3dNativePicaFrontend* PicaFrontend = nullptr;
@@ -386,6 +390,8 @@ class NativeA32CtrHostServices final : public NativeA32HostServices {
         uint64_t FileSize = 0;
         uint32_t FileOpenMode = 0;
         bool FileClosed = false;
+        // A RomFS file of the installed update (NCCH file path type 5).
+        bool UpdateRomFs = false;
         // Save file on the directory backend: this handle's identifier
         // as a journal writer (CtrSaveJournal; 0 = has not written yet).
         uint64_t SaveJournalWriter = 0;

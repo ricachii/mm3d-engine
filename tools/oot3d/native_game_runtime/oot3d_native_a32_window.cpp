@@ -1,4 +1,6 @@
 // Native A32 window: the session driver (Run, Finish) and the guest-run helpers the session files share.
+#include "oot3d_native_a32_process_image.h"
+#include "oot3d_native_title_profile.h"
 #include "oot3d_native_a32_window.h"
 #include "oot3d_native_a32_window_session.h"
 #include "oot3d_native_a32_window_summary.h"
@@ -434,6 +436,24 @@ void NativeA32WindowSession::Finish() {
 } // namespace Oot3dA32Window
 
 void RunOot3dNativeA32Window(const Oot3dNativeGameLaunch &launch) {
+  // The TopScreen UI is a port of OoT3D's interface (OoT3D addresses): another
+  // title (TitleProfile::Oot3dGameSemantics) runs the classic UI instead.
+  if (launch.UiProfile == Oot3dNativeGame::Oot3dUiProfile::TopScreen) {
+    const auto manifest = Oot3dNativeGame::LoadNativeA32ProcessImageManifest(
+        launch.A32ProcessManifestPath, nullptr);
+    if (manifest.has_value() &&
+        !Oot3dNativeGame::ResolveTitleProfile(
+             Oot3dNativeGame::ReadProgramId(manifest->CodeBinPath))
+             .Oot3dGameSemantics) {
+      std::fprintf(stderr, "ui profile: topscreen is OoT3D-only; this title "
+                           "runs the classic UI\n");
+      Oot3dNativeGameLaunch classic = launch;
+      classic.UiProfile = Oot3dNativeGame::Oot3dUiProfile::Oot3d;
+      Oot3dA32Window::NativeA32WindowSession session(classic);
+      session.Run();
+      return;
+    }
+  }
   Oot3dA32Window::NativeA32WindowSession session(launch);
   session.Run();
 }

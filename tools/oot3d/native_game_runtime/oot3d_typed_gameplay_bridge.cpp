@@ -10,6 +10,7 @@
 #include "oot3d_gameplay_quake.h"
 #include "oot3d_gameplay_skel_anime.h"
 #include "oot3d_native_a32_memory.h"
+#include "oot3d_native_compiled_functions.h"
 #include "oot3d_native_a32_vfp_ops.h"
 #include "oot3d_typed_actor_lifecycle.h"
 #include "oot3d_typed_actor_update_records.h"
@@ -6109,7 +6110,8 @@ bool ExecuteOot3dTypedGameplay(std::uint32_t pc,
                                oot3d::recomp::a32::ExecutionResult *result,
                                const Oot3dTypedGameplayContext &context,
                                std::uint32_t *blocksConsumed) {
-  if (result == nullptr || !std::isfinite(context.NativeUpdateRate) ||
+  if (result == nullptr || !Oot3dGameSemanticsEnabled() ||
+      !std::isfinite(context.NativeUpdateRate) ||
       context.NativeUpdateRate <= 0.0f) {
     return false;
   }
